@@ -2,6 +2,8 @@
 
 Play retro console games translated automatically, on any Windows PC. Supported for now: Mega Drive / Genesis.
 
+Website: https://leofeitosa.github.io/retro-translator/
+
 Retro Translator runs the game in its own emulator, learns the game's font by itself, finds the game's text and
 translates it while you play. It works offline, runs on the CPU only, and needs no installation. No ROM is included:
 you use your own.
@@ -26,7 +28,7 @@ away. A new version clears what an older one learned by itself, so updating is j
 ## Languages
 
 - Games in English, French, Spanish or Japanese (detected by itself).
-- Translated into Portuguese (Brazil), Portuguese (Portugal) or Spanish.
+- Translated into Portuguese (Brazil), Portuguese (Portugal), Spanish, English or French.
 
 ## How it works
 
