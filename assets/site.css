@@ -59,3 +59,5 @@ main section{padding:40px 16px}
 .top{padding:14px 16px}
 .support{border-radius:0}
 }
+.video video{display:block;width:100%;height:auto;background:#000;border:6px solid var(--indigo);border-radius:12px}
+.video p{color:var(--soft);max-width:40em}
