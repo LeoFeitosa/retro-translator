@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://leofeitosa.github.io/retro-translator/sitemap.xml
