@@ -23,6 +23,10 @@ WF=~/retro-win/python/Lib/site-packages/wordfreq/data; mkdir -p "$WIN/src/wf"
 for l in en fr es pt ja zh; do cp $WF/large_$l.msgpack.gz $WF/small_$l.msgpack.gz "$WIN/src/wf/"; done
 cp $WF/_chinese_mapping.msgpack.gz "$WIN/src/wf/"
 cp ~/apertium-win/data2/* "$A/data/"
+# the translation model (two thirds of the program) travels as a zip after the executable's own files: PyInstaller
+# would unpack it on every start; the program unpacks it once (core/translating/neural.py)
+( cd "$WIN/src/retro_translator/data" && python3 -c "import shutil; shutil.make_archive('../../../neural', 'zip', '.', 'neural')" )
+rm -rf "$WIN/src/retro_translator/data/neural"
 cd "$WIN/src"
 ~/retro-win/python/python.exe -m PyInstaller --noconfirm --onefile --windowed --name retro-translator \
   --distpath ../dist --workpath ../build \
@@ -30,5 +34,5 @@ cd "$WIN/src"
   --add-data "retro_translator/consoles;retro_translator/consoles" --collect-submodules retro_translator \
   --collect-all ctranslate2 --collect-all sentencepiece \
   retro_translator/__main__.py > ../pyinstaller.log 2>&1 || { tail -30 ../pyinstaller.log; exit 1; }
-cp ../dist/retro-translator.exe "$FINAL"
+cat ../dist/retro-translator.exe ../neural.zip > "$FINAL"
 du -sh "$FINAL"

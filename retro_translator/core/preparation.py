@@ -10,6 +10,7 @@ from retro_translator import VERSION, consoles
 from retro_translator.core import overlay, progress
 from retro_translator.core.reading import cjk, decipher, evaluate
 from retro_translator.core.rewriting import rom_text
+from retro_translator.core.translating import ai
 
 MIN_KANA = 8  # glyphs placed by the kana order of the ROM font that make a game Japanese (Latin games: 0)
 
@@ -17,7 +18,7 @@ MIN_KANA = 8  # glyphs placed by the kana order of the ROM font that make a game
 CJK = {}
 FOLDER = os.path.join(os.path.expanduser("~"), ".retro-translator")  # learned games and settings (the program may be in a read-only folder)
 REPORTS = "unreadable"  # one report per game refused for its letters
-PHASES = ["play", "font", "kana", "translate", "test"]
+PHASES = ["play", "font", "kana", "ai", "translate", "test"]
 
 
 def title(name_):
@@ -90,6 +91,11 @@ def step(work, phase):
     progress.expect(0)
 
 
+def tag(language):
+    """The language of the files a translation is kept in: the AI's own apart, so turning it on translates again."""
+    return language + (".ai" if ai.ENABLED else "")
+
+
 def prepare(rom, name_, language, work, folder=None):
     """Everything the first time needs: learns the font and, for a Latin game, writes the translated ROM."""
     try:
@@ -97,13 +103,20 @@ def prepare(rom, name_, language, work, folder=None):
         if work["unreadable"] and not work["ascii"]:  # a wrong letter table gives a broken translation: better none
             return
         work["japanese"] = overlay.translation.SOURCE in ("ja", "zh")
-        translated = os.path.join(FOLDER, f"{name_}.{language}.bin")
+        translated = os.path.join(FOLDER, f"{name_}.{tag(language)}.bin")
         if work["japanese"]:
             translated = rom  # the ROM holds no Latin letters to rewrite: the translation is drawn on top
         elif os.path.exists(translated + ".rejected"):
             translated = rom
         elif not os.path.exists(translated):
             try:  # text found in the ROM is replaced right there: the game draws the translation itself
+                if ai.ENABLED and not ai.ready():  # chosen on the home screen: downloaded once, here
+                    step(work, "ai")
+                    try:
+                        ai.install()
+                    except OSError:  # no connection or a damaged download: the usual translation, said on screen
+                        ai.ENABLED, work["ai_failed"] = False, True
+                        translated = os.path.join(FOLDER, f"{name_}.{tag(language)}.bin")
                 step(work, "translate")
                 mode_ = rom_text.translate(rom, language, translated, table, ascii_only=work["ascii"])
                 step(work, "test")

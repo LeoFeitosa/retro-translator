@@ -9,12 +9,32 @@ MODEL = os.path.join(DATA, "neural", "m2m418")
 _M = {}
 
 
+def _model_dir():
+    """The model folder. The executable carries it as a zip after its own files, so it is not unpacked again on every
+    start (two thirds of the program): it is unpacked once per version into the user's folder, older copies go."""
+    import sys
+    if os.path.isdir(MODEL) or not getattr(sys, "frozen", False):
+        return MODEL
+    import shutil
+    import zipfile
+    from retro_translator import VERSION
+    from retro_translator.core import preparation
+    base = os.path.join(preparation.FOLDER, "neural")
+    target = os.path.join(base, VERSION)
+    if not os.path.exists(os.path.join(target, "done")):
+        shutil.rmtree(base, ignore_errors=True)  # a copy of another version, or one cut short
+        zipfile.ZipFile(sys.executable).extractall(target)
+        open(os.path.join(target, "done"), "w").close()
+    return os.path.join(target, "neural", "m2m418")
+
+
 def _model():
     if not _M:
         import ctranslate2
         import sentencepiece
-        _M["t"] = ctranslate2.Translator(MODEL, device="cpu", compute_type="int8")
-        _M["s"] = sentencepiece.SentencePieceProcessor(os.path.join(MODEL, "sentencepiece.bpe.model"))
+        path_ = _model_dir()
+        _M["t"] = ctranslate2.Translator(path_, device="cpu", compute_type="int8")
+        _M["s"] = sentencepiece.SentencePieceProcessor(os.path.join(path_, "sentencepiece.bpe.model"))
     return _M["t"], _M["s"]
 
 

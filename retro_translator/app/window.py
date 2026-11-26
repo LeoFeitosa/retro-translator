@@ -17,6 +17,7 @@ from retro_translator.core import progress
 from retro_translator import consoles
 from retro_translator import DATA
 from retro_translator.app import updater
+from retro_translator.core.translating import ai
 from retro_translator.app.dialogs import pick_folder, pick_rom
 from retro_translator.app.settings import clear_if_changed, default_folder, settings
 from retro_translator.app.texts import LANGUAGES, TEXT
@@ -28,10 +29,10 @@ KEYS = {pygame.K_UP: "UP", pygame.K_DOWN: "DOWN", pygame.K_LEFT: "LEFT", pygame.
 SCALE = 3
 INK, PANEL, EDGE = (13, 15, 41), (22, 25, 59), (44, 79, 209)
 YELLOW, WHITE, SILVER, DIM, GREEN = (242, 194, 48), (255, 255, 255), (190, 198, 214), (96, 104, 150), (96, 214, 128)
-STEPS = [("learn", ["play", "font", "kana"]), ("translate", ["translate"]), ("test", ["test"])]  # what the screen lists
+STEPS = [("learn", ["play", "font", "kana"]), ("translate", ["ai", "translate"]), ("test", ["test"])]  # what the screen lists
 # share of the whole preparation each phase takes (measured on Alien Storm and Madou): the one bar covers them all
-WEIGHT = {"play": 0.22, "font": 0.35, "kana": 0.25, "translate": 0.08, "test": 0.10}
-EXPECTED = {"play": 70, "font": 110, "kana": 80, "translate": 25, "test": 30}  # seconds, for a phase with no count
+WEIGHT = {"play": 0.22, "font": 0.35, "kana": 0.25, "ai": 0.15, "translate": 0.08, "test": 0.10}
+EXPECTED = {"play": 70, "font": 110, "kana": 80, "ai": 300, "translate": 25, "test": 30}  # seconds, for a phase with no count
 _GLYPHS, _RENDERED = {}, {}
 def update(screen, info, t):
     """The update screen: downloads the new executable with a progress bar (Esc cancels) and restarts into it.
@@ -137,7 +138,8 @@ def home(screen, rom=None, language=None):
     k_lang = codes.index(language or last.get("language", "pt")) if (language or last.get("language", "pt")) in codes \
         else 0
     folder = last.get("folder") or default_folder()
-    row, clock, rows = (3 if rom else 0), pygame.time.Clock(), []
+    use_ai = bool(last.get("ai"))  # the optional AI translation (core/translating/ai.py)
+    row, clock, rows = (4 if rom else 0), pygame.time.Clock(), []
     new_build = {}  # filled in the background when a newer version is published
     threading.Thread(target=updater.check_update, args=(new_build,), daemon=True).start()
     auto_tried, pointer = False, None
@@ -148,15 +150,15 @@ def home(screen, rom=None, language=None):
         t = TEXT[codes[k_lang]]
         panel = frame_(screen, os.path.splitext(os.path.basename(rom))[0] if rom else "")
         values = [title(os.path.splitext(os.path.basename(rom))[0]) if rom else t["no_game"],
-                  "◀ " + LANGUAGES[k_lang][1] + " ▶", folder, None]
-        labels = [t["game"], t["to"], t["folder"], t["start"]]
-        slot, rows = (panel.h - 40) // 4, []
-        for k in range(4):
+                  "◀ " + LANGUAGES[k_lang][1] + " ▶", "◀ " + (t["ai_yes"] if use_ai else t["ai_no"]) + " ▶", folder, None]
+        labels = [t["game"], t["to"], t["ai"], t["folder"], t["start"]]
+        slot, rows = (panel.h - 40) // 5, []
+        for k in range(5):
             y = panel.y + 20 + slot * k
             box = pygame.Rect(panel.x + 20, y, panel.w - 40, slot - 12)
             rows.append(box)
             on = k == row
-            if k == 3:  # the start button
+            if k == 4:  # the start button
                 ready = rom is not None
                 pygame.draw.rect(screen, (YELLOW if on else EDGE) if ready else (34, 38, 82), box.inflate(-200, -8))
                 write(screen, labels[k], box.center[:1] + (box.centery - 24,), INK if on and ready else
@@ -175,10 +177,10 @@ def home(screen, rom=None, language=None):
         if new_build:  # a newer version: a button where the key hints were
             box = pygame.Rect(screen.get_width() // 2 - 330, screen.get_height() - 58, 660, 48)
             rows.append(box)
-            pygame.draw.rect(screen, YELLOW if row == 4 else GREEN, box)
+            pygame.draw.rect(screen, YELLOW if row == 5 else GREEN, box)
             write(screen, t["update"].format(new_build["version"]), box.center[:1] + (box.y + 8,), INK, 2, "center")
         else:
-            hint = t["keys_home"] if row != 1 else t["keys_lang"]
+            hint = {1: t["keys_lang"], 2: t["keys_ai"]}.get(row, t["keys_home"])
             write(screen, hint, (screen.get_width() // 2, screen.get_height() - 48), DIM, 2, "center")
         scanlines(screen)
         pygame.display.flip()
@@ -191,6 +193,8 @@ def home(screen, rom=None, language=None):
                 row = (row + (1 if ev.key == pygame.K_DOWN else -1)) % len(rows)
             elif ev.type == pygame.KEYDOWN and ev.key in (pygame.K_LEFT, pygame.K_RIGHT) and row == 1:
                 k_lang = (k_lang + (1 if ev.key == pygame.K_RIGHT else -1)) % len(LANGUAGES)
+            elif ev.type == pygame.KEYDOWN and ev.key in (pygame.K_LEFT, pygame.K_RIGHT) and row == 2:
+                use_ai = not use_ai
             elif ev.type == pygame.MOUSEMOTION:  # only a pointer that moves: the window opening under it does not
                 # take the selection off the button
                 if pointer is not None and ev.pos != pointer:
@@ -202,16 +206,18 @@ def home(screen, rom=None, language=None):
                 act = next((k for k, r in enumerate(rows) if r.collidepoint(ev.pos)), None)
             if act == 0:
                 rom = pick_rom() or rom
-                row = 3 if rom else 0
+                row = 4 if rom else 0
             elif act == 1:
                 k_lang = (k_lang + 1) % len(LANGUAGES)
             elif act == 2:
+                use_ai = not use_ai
+            elif act == 3:
                 folder = pick_folder(t["folder"]) or folder
-            elif act == 4 and new_build:
+            elif act == 5 and new_build:
                 if not update(screen, new_build, t):
-                    row = 3  # the download did not finish: the program goes on as it is
-            elif act == 3 and rom:
-                settings(rom=rom, language=codes[k_lang], folder=folder)
+                    row = 4  # the download did not finish: the program goes on as it is
+            elif act == 4 and rom:
+                settings(rom=rom, language=codes[k_lang], folder=folder, ai=use_ai)
                 return rom, codes[k_lang], folder
 
 
@@ -245,7 +251,8 @@ def draw_progress(screen, name_, language, work, seconds):
             write(screen, "·", (x, y), DIM, 3)
         write(screen, t[name_s], (x + 40, y + 8), SILVER if k < now else YELLOW if k == now else DIM)
     if now_p < len(phases):  # what is happening right now, in a sentence
-        write(screen, t["why_" + phases[now_p]], (panel.centerx, view.bottom + 26), SILVER, 2, "center")
+        why = t["ai_failed"] if phases[now_p] == "translate" and work.get("ai_failed") else t["why_" + phases[now_p]]
+        write(screen, why, (panel.centerx, view.bottom + 26), SILVER, 2, "center")
     elif work.get("saved"):
         line = f"{t['saved']}: {work['saved']}"
         if len(line) > 56:  # a long path keeps its end: the folder and the file
@@ -347,6 +354,7 @@ def main(rom=None, language=None, test=0):
     while result is None:  # a game that cannot be read sends the player back to choose another
         if not test:
             rom, language, folder = home(screen, rom, language)
+            ai.ENABLED = bool(settings().get("ai"))
         name_ = os.path.splitext(os.path.basename(rom))[0]
         pygame.display.set_caption(f"Retro Translator - {title(name_)}")
         result = preparing(screen, name_, language, rom, folder)
@@ -355,7 +363,7 @@ def main(rom=None, language=None, test=0):
     table, translated = result
     font_ = overlay.Font({} if overlay.translation.SOURCE in ("ja", "zh") else table)  # Japanese: Latin letters
     # of the library (the Latin table of a kana font is kana read as letters)
-    trans = overlay.Overlay(language, os.path.join(preparation.FOLDER, f"{name_}.{language}.json"))
+    trans = overlay.Overlay(language, os.path.join(preparation.FOLDER, f"{name_}.{preparation.tag(language)}.json"))
     japanese = overlay.translation.SOURCE in ("ja", "zh")
     reader = cjk.Reader(overlay.translation.SOURCE, preparation.CJK["map"], bytes(consoles.for_rom(rom).read_rom(rom))) if japanese else None
     memory = translated != rom and os.path.exists(translated + ".memory")  # the game verifies its ROM on power-up

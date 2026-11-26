@@ -287,6 +287,18 @@ def translate_batch(texts, language="pt", with_rules=True):
             rest.append(i)
     if not rest:
         return out_
+    from retro_translator.core.translating import ai
+    if ai.ENABLED and ai.ready():  # the player chose the AI: it translates, the usual way covers what it fails
+        try:
+            done_ = ai.translate([texts[i] for i in rest], language, SOURCE)
+        except OSError:  # the engine did not start: the usual way
+            done_ = [None] * len(rest)
+        for i, got in zip(list(rest), done_):
+            if got:
+                out_[i] = _case_like(texts[i], got)
+                rest.remove(i)
+        if not rest:
+            return out_
     # A line break is just a space to Apertium and the transfer moves words from one sentence to another:
     # " ." at the end of each holds the boundary
     tails = {i: _tail(texts[i]) for i in rest}  # put back as they came after the model
