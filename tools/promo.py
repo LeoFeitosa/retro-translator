@@ -29,6 +29,7 @@ WIN_W, WIN_H = 1440, 1008  # the 960x672 window at 1.5x
 WX, WY = 40, (H - WIN_H) // 2
 FONTS = os.environ.get("RT_FONTS", os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts"))
 SITE = "leofeitosa.github.io/retro-translator"
+SHOWN_FOLDER = "C:\\Games\\Retro Translator"  # the folder on the home screen: a Windows one, not the machine recording
 FFMPEG = os.environ.get("RT_FFMPEG", "ffmpeg").split()  # the ffmpeg command, e.g. a "docker run ... ffmpeg-image"
 INDIGO, DEEP, YELLOW, SILVER = (22, 25, 59), (13, 15, 41), (242, 194, 48), (221, 227, 232)
 # the scenes: the game played by the same scripted input as tools/cjk_screen.py; the player stops to read each box
@@ -167,7 +168,7 @@ def record(rom, lang):
             rec.sound(data)
 
     def home(screen, rom_=None, language=None):
-        saved = window.settings().get("language", "pt")
+        saved = window.settings(folder=window.settings().get("folder") or SHOWN_FOLDER).get("language", "pt")
         rec.phase, rec.n, rec.down = "picker", 0, False
         rec.pos, rec.moves = [c for c, _ in texts.LANGUAGES].index(saved), [pygame.K_UP, pygame.K_UP]
         return real["home"](screen, rom_, language)

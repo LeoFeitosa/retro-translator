@@ -689,6 +689,7 @@ def screens(route, translated=None):
         m.run_frames(4, [b] if b else [])
         m.run_frames(16)
         v.append(zlib.crc32(m.frame.tobytes()))
+        _leave_view(m, i)
     return v
 
 
@@ -710,21 +711,50 @@ def brightness(route, translated=None):
             m.write_rom(open(translated, "rb").read(), bytes(console.read_rom(route)))
         m.run_frames(4, ["START"] if i % 20 == 0 else [])
         m.run_frames(16)
+        _leave_view(m, i)
         if i % 40 == 39:
             v.append(int(m.frame.mean()))
     return v
 
 
+def _leave_view(m, i):
+    """In the measuring process: the screen it is playing, left for the program's window every few steps."""
+    path = os.environ.get("RT_VIEW")
+    if path and i % 5 == 0:
+        np.save(path + ".tmp.npy", m.frame)
+        os.replace(path + ".tmp.npy", path)
+
+
 def _brightness_in_process(*roms, mode="--brightness"):
     import subprocess
+    import tempfile
+    import time
+    from retro_translator.core import progress
     if getattr(sys, "frozen", False):  # in the exe, the program itself measures
         cmd = [sys.executable, mode, *roms]
     else:
         cmd = [sys.executable, "-m", "retro_translator", mode, *roms]
     root = os.path.dirname(HERE)  # the folder that holds the package
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
-                       env={**os.environ, "PYTHONPATH": root})  # the package is found from any working folder
-    lines = p.stdout.strip().splitlines()
+    view = os.path.join(tempfile.gettempdir(), f"rt-view-{os.getpid()}.npy")
+    out_ = tempfile.TemporaryFile("w+")  # a file, not a pipe: a full pipe would stop the child while this waits
+    p = subprocess.Popen(cmd, stdout=out_, stderr=subprocess.DEVNULL, text=True,
+                         env={**os.environ, "PYTHONPATH": root, "RT_VIEW": view})  # the package is found from any folder
+    t0 = time.time()
+    while p.poll() is None:  # the game being tested shows on the preparing screen, as it plays
+        if time.time() - t0 > 600:
+            p.kill()
+            return None
+        time.sleep(0.3)
+        try:
+            progress.show(np.load(view))
+        except (OSError, ValueError):
+            pass
+    try:
+        os.remove(view)
+    except OSError:
+        pass
+    out_.seek(0)
+    lines = out_.read().strip().splitlines()
     return eval(lines[-1]) if p.returncode == 0 and lines else None
 
 

@@ -1,5 +1,6 @@
 """Groups the on-screen text runs into blocks, translates them and redraws the translated block
 on the emulator image using the game's own font (accents built on top of the base letter)."""
+import functools
 import json
 import os
 import unicodedata
@@ -32,6 +33,16 @@ def looks_english(text):
     return any(len(p) >= 3 for p in real) and len(real) >= 0.7 * len(ps) and loose <= len(ps) / 3
 
 
+@functools.lru_cache(maxsize=4096)
+def _icon(line, known):
+    """`line` with its one unread cell as NUL: the rest is real words and no letter the table lacks makes words there."""
+    from retro_translator.core.rewriting.rom_text import real_words
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # the cases the font has: a game with no lowercase draws none
+    missing = {c for c in alphabet + alphabet.lower() if c.isupper() == any(k.isupper() for k in known) or
+               c.islower() == any(k.islower() for k in known)} - set(known)
+    return real_words(line.replace("\0", "").strip()) and not any(real_words(line.replace("\0", m)) for m in missing)
+
+
 def blocks(md, table):
     """Groups left-aligned runs on nearby lines (dialog box, menu)."""
     list_ = []
@@ -41,7 +52,13 @@ def blocks(md, table):
         if (y * 8 - dy) % 1024 >= alt or (x * 8 + dx) % 512 >= width:
             continue  # off screen (font sheet kept in the plane, text already scrolled out)
         letters = [c for c in tr if c]
-        if not letters or not all(c in table for c in letters):
+        unread = [k for k, c in enumerate(tr) if c and c not in table]
+        if letters and len(unread) == 1 and unread[0] in (tr.index(letters[0]), len(tr) - 1 - tr[::-1].index(letters[-1])):
+            k = unread[0]  # one cell at the edge ("①NEW GAME"): an icon or cursor when no missing letter makes a word there
+            rest = tr[k + 1:] if k == tr.index(letters[0]) else tr[:k]
+            if _icon(decode_(tr, {**table, tr[k]: "\0"}).strip(), frozenset(v for v in table.values() if v)):
+                x, tr, letters, unread = (x + k + 1 if rest is not tr[:k] else x), rest, [c for c in rest if c], []
+        if not letters or unread:
             continue  # a cell it cannot read may be a letter: translated, the line would come out with a wrong one
         text = decode_(tr, table).strip()
         for b in list_:
