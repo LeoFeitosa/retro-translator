@@ -1,0 +1,30 @@
+"""Starts the program.
+    python -m retro_translator [GAME] [language]      the window (without a game it opens the file picker)
+    python -m retro_translator --test GAME [language] no window: plays by itself and saves screens to output/
+Keys: arrows, Z/X/C = A/B/C, Enter = Start, Esc = quit, F1 = translation on/off."""
+import os
+import sys
+
+from retro_translator.app import window
+from retro_translator.core import preparation
+from retro_translator.core.rewriting import rom_text
+
+
+def run(args):
+    if args[:1] == ["--brightness"]:  # internal: the screen measured in a separate process (rom_text.link_)
+        print(rom_text.brightness(*args[1:3]))
+    elif args[:1] == ["--test"]:
+        os.environ["SDL_VIDEODRIVER"] = "dummy"
+        window.main(args[1], args[2] if len(args) > 2 else "pt", test=6000)
+    else:
+        try:
+            window.main(*args[:2])
+        except Exception:  # the windowed executable has no console: the error goes to a file the user can send
+            import traceback
+            os.makedirs(preparation.FOLDER, exist_ok=True)
+            open(os.path.join(preparation.FOLDER, "error.log"), "w", encoding="utf-8").write(traceback.format_exc())
+            raise
+
+
+if __name__ == "__main__":
+    run(sys.argv[1:])

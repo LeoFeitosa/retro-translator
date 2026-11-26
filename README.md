@@ -1,21 +1,29 @@
 # Retro Translator
 
-Play retro console games translated automatically, on any Windows PC. Supported for now: Mega Drive / Genesis.
+Play retro console games translated into your language, on any Windows PC. Offline, on the CPU, nothing to install.
 
-Website: https://leofeitosa.github.io/retro-translator/
+Website: <https://leofeitosa.github.io/retro-translator/>
 
-Retro Translator runs the game in its own emulator, learns the game's font by itself, finds the game's text and
-translates it while you play. It works offline, runs on the CPU only, and needs no installation. No ROM is included:
+Retro Translator runs the game in its own emulator, learns the game's font by itself, finds the game's text in the ROM
+and translates it, so the game draws the translation with its own font, colours and animations. No ROM is included:
 you use your own.
+
+## Consoles
+
+| Console | Files | Status |
+| --- | --- | --- |
+| Mega Drive / Genesis | `.bin` `.md` `.gen` `.smd` | Supported |
+
+New consoles plug in as isolated modules: see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#adding-a-console).
 
 ## Download and play (Windows 10/11)
 
-1. Open [Releases](../../releases/latest) and download `retro-translator.exe`.
-2. Open it, pick a ROM (`.bin`, `.md`, `.gen` or `.smd`) and the language to translate into.
+1. Open [Releases](https://github.com/LeoFeitosa/retro-translator/releases/latest) and download `retro-translator.exe`.
+2. Open it, pick a game, the language to translate into and the folder for the translated copy.
 
-Nothing to install or extract: the exe is portable. The first time you open a game, Retro Translator plays it by itself
-for a few minutes to learn its font and text. After that, the game starts translated, and the next time it opens right
-away. A new version clears what an older one learned by itself, so updating is just downloading the new exe.
+The exe is portable. The first time a game is opened, Retro Translator plays it by itself for a few minutes to learn
+it; after that the game opens translated right away, and a translated copy of the same file type is saved for any
+emulator. When a new version is published, the home screen offers it and updates in one click.
 
 | Key | Button |
 | --- | --- |
@@ -33,22 +41,39 @@ away. A new version clears what an older one learned by itself, so updating is j
 ## How it works
 
 - **Reading the font.** Latin text is treated as a substitution cipher: the glyphs on screen are matched to letters
-  with a word-frequency dictionary and the order the font is stored in. Japanese kana are placed exactly by the order
-  of the font; kanji are read by shape.
+  with a word-frequency dictionary and the order the font is stored in. A letter is used only when real words prove
+  it; a game whose letters cannot be proven is not translated, and the program says so.
 - **Translating inside the ROM.** Text found in the ROM is translated with rule-based machine translation
-  ([Apertium](https://apertium.org)) and written back in place, fitted to the original space, so the game draws it with
-  its own font, colours and animations. Japanese is translated by an offline neural model on the CPU.
-- **Staying safe.** Before using a translated ROM, Retro Translator runs it next to the original and leaves out changes
-  that would stop the game.
-- **Everything else.** Text that cannot be found in the ROM is redrawn on top of the screen.
+  ([Apertium](https://apertium.org)) and written back in place, fitted to the original space. Only whole messages are
+  written. Japanese and Chinese are translated by an offline neural model.
+- **Staying safe.** Before using a translated ROM, Retro Translator runs it next to the original and leaves out
+  changes that would stop the game.
+- **Everything else.** Text that cannot be found in the ROM is drawn over the screen while you play.
 
 ## Limitations
 
-- Most sentences read well; some come out literal or wrong.
-- Graphic text (logos, title art) is not translated.
+- Machine translation: most sentences read well, some come out literal or wrong.
+- Graphic text (logos, title art) and games whose capital letters never appear on screen are translated only in part
+  or not at all.
 - Japanese: a kanji read wrong can change the meaning of a sentence.
 
-## Licenses
+## From source
+
+```sh
+python -m venv .venv
+.venv/bin/pip install -e ".[japanese]"
+python -m retro_translator [GAME] [pt|pt-PT|es|en|fr]
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the data the program needs outside git, the checks to run and the code
+style, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the code is organized.
+
+## License
+
+Retro Translator is free for **noncommercial** use under the
+[PolyForm Noncommercial License 1.0.0](LICENSE.md): you may use, study, change and share it for personal, hobby,
+study, research and other noncommercial purposes. Selling it, or using it in a commercial product or service, is not
+allowed. Copyright LeoFeitosa.
 
 The program bundles third-party software, each under its own license: see [THIRD_PARTY.md](THIRD_PARTY.md). The
-sources required by those licenses are attached to every release.
+sources those licenses require are attached to every release.

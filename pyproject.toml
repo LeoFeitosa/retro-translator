@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "retro-translator"
+dynamic = ["version"]
+description = "Play retro console games translated into your language, offline."
+readme = "README.md"
+license = { file = "LICENSE.md" }
+requires-python = ">=3.10"
+dependencies = ["numpy", "pillow", "pygame", "wordfreq"]
+
+[project.optional-dependencies]
+japanese = ["ctranslate2", "sentencepiece"]
+
+[project.urls]
+Homepage = "https://leofeitosa.github.io/retro-translator/"
+Source = "https://github.com/LeoFeitosa/retro-translator"
+
+[tool.setuptools.dynamic]
+version = { attr = "retro_translator.VERSION" }
+
+[tool.setuptools.packages.find]
+include = ["retro_translator*"]
+
+[tool.setuptools.package-data]
+retro_translator = ["data/**/*", "consoles/**/*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["F", "E9"]

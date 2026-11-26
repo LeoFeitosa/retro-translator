@@ -1,0 +1,242 @@
+"""Translation without AI: a glossary of game phrases, then Apertium (rules). Words Apertium does not know
+stay as they are (character, place and move names)."""
+import functools
+import json
+import os
+import re
+import subprocess
+from retro_translator import DATA
+
+# Apertium programs for Windows (official 3.10 build) and language pairs compiled with them (tools/build_pairs.sh).
+# During development (WSL) the same .exe run through interop; in the executable they sit next to the program.
+_JOINED = os.path.join(DATA, "apertium")  # only in the executable (Windows build of Apertium)
+BIN = os.environ.get("APERTIUM_BIN", os.path.join(_JOINED, "bin") if os.path.isdir(_JOINED)
+                     else os.path.expanduser("~/apertium-win/bin"))
+APERTIUM_DATA = os.environ.get("APERTIUM_DATA", os.path.join(_JOINED, "data") if os.path.isdir(_JOINED)
+                       else os.path.expanduser("~/apertium-win/data2"))
+_NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}  # windowed exe: each console child would open a terminal
+SOURCE = "en"  # the game's language, found from the font (core/preparation.py, decipher)
+# The offline neural model (neural.py) translates straight into each language: it measured better than the
+# rule-based pairs (chrF 0.558 against 0.512 for English to Portuguese; French through Apertium left words untranslated).
+# European Portuguese goes through Spanish and the rule-based es-pt pair, which has that variant; Spanish games use the
+# es-pt pair, a close and accurate one.
+ROUTES = {o: {d: ["neural-" + d] for d in ("pt", "es", "en", "fr")} for o in ("en", "fr", "ja", "zh")}
+for o in ROUTES:
+    ROUTES[o]["pt-PT"] = ["neural-es", "spa-por_PT"]
+ROUTES["es"] = {"pt": ["spa-por"], "pt-PT": ["spa-por_PT"], "en": ["neural-en"], "fr": ["neural-fr"]}
+for o in ROUTES:
+    ROUTES[o][o] = []  # the game is already in that language
+
+
+class _Route(dict):
+    """Pairs from the game's language (SOURCE) to each target language."""
+    def __getitem__(self, language):
+        return ROUTES.get(SOURCE, {})[language]
+
+    def __contains__(self, language):
+        return language in ROUTES.get(SOURCE, {})
+
+
+PATH_ = _Route()
+STEPS = {
+    "eng-spa": [["lt-proc", "eng-spa.automorf.bin"], ["apertium-tagger", "-g", "eng-spa.prob"], ["apertium-pretransfer"],
+                ["apertium-transfer", "-n", "apertium-eng-spa.eng-spa.genitive.t1x", "eng-spa.genitive.bin"],
+                ["lt-proc", "-b", "eng-spa.autobil.bin"], ["lrx-proc", "-m", "eng-spa.autolex.bin"],
+                ["apertium-transfer", "-b", "apertium-eng-spa.eng-spa.t1x", "eng-spa.t1x.bin"],
+                ["apertium-interchunk", "apertium-eng-spa.eng-spa.t2x", "eng-spa.t2x.bin"],
+                ["apertium-postchunk", "apertium-eng-spa.eng-spa.t3x", "eng-spa.t3x.bin"],
+                ["lt-proc", "-g", "eng-spa.autogen.bin"], ["lt-proc", "-p", "eng-spa.autopgen.bin"]],
+    "fra-spa": [["lt-proc", "fra-spa.automorf.bin"], ["apertium-tagger", "-g", "fra-spa.prob"], ["apertium-pretransfer"],
+                ["lt-proc", "-b", "fra-spa.autobil.bin"], ["lrx-proc", "-m", "fra-spa.autolex.bin"],
+                ["apertium-transfer", "-b", "apertium-fra-spa.fra-spa.t1x", "fra-spa.t1x.bin"],
+                ["apertium-interchunk", "apertium-fra-spa.fra-spa.t2x", "fra-spa.t2x.bin"],
+                ["apertium-postchunk", "apertium-fra-spa.fra-spa.t3x", "fra-spa.t3x.bin"],
+                ["lt-proc", "-g", "fra-spa.autogen.bin"], ["lt-proc", "-p", "fra-spa.autopgen.bin"]],
+    "spa-por_PT": [["lt-proc", "es-pt.automorf.bin"], ["apertium-tagger", "-g", "es-pt.prob"], ["apertium-pretransfer"],
+                   ["lt-proc", "-b", "es-pt_PT.autobil.bin"], ["apertium-transfer", "-b", "es-pt_PT.t1x", "es-pt_PT.t1x.bin"],
+                   ["lt-proc", "-g", "es-pt_PT.autogen.bin"], ["lt-proc", "-p", "es-pt_PT.autopgen.bin"]],
+    # bilingual in its own step (lt-proc -b): the 3.10 transfer with the embedded bilingual lost the last tag
+    "spa-por": [["lt-proc", "es-pt.automorf.bin"], ["apertium-tagger", "-g", "es-pt.prob"], ["apertium-pretransfer"],
+                ["lt-proc", "-b", "es-pt_BR.autobil.bin"], ["apertium-transfer", "-b", "es-pt_BR.t1x", "es-pt_BR.t1x.bin"],
+                ["lt-proc", "-g", "es-pt_BR.autogen.bin"], ["lt-proc", "-p", "es-pt_BR.autopgen.bin"]],
+}
+AFTER = {"pt": [(r"(?i)\beste tempo\b", lambda m: "Desta vez" if m.group(0)[0].isupper() else "desta vez"),  # "this time"
+                 (r"(?i)\b(oh,?) nenhum\b", r"\1 não"),  # "oh no"
+                 # a state takes "estar": "the box is empty" -> "está vazia", not "é vazia"
+                 (r"(?i)\b([eé]) (vazi|chei|pront|abert|fechad|mort|cansad|ferid|livre|ocupad|perdid|salv)",
+                  lambda m: ("Está " if m.group(1).isupper() else "está ") + m.group(2)),
+                 (r"(?i)(\w)- (lhe|lhes|lo|la|los|las|me|te|se|nos)\b", r"\1-\2"),  # loose clitic hyphen
+                 (r"\bImprensa\b", "Aperte"), (r"\bimprensa\b", "aperte"), (r"\bIMPRENSA\b", "APERTE"),
+                 # Spanish "fuera" after a verb is the adverb (out), not the verb "ser"
+                 (r"(?i)(\w-(?:lo|la|los|las|lhe|lhes|me|te|se|nos)) (fosse)\b",
+                  lambda m: m.group(1) + " " + ("FORA" if m.group(2).isupper() else "fora")),
+                 (r"\bPulsar\b", "Aperte"), (r"\bpulsar\b", "aperte"), (r"\bPULSAR\b", "APERTE"),  # "press" in a game is a button
+                 (r"(?i)\b(em|de|a|o|para|com|que|e) \1\b", r"\1"), (r"\bvoss([ao]s?)\b", r"su\1"), (r"\bVoss([ao]s?)\b", r"Su\1"), (r"\bsuo\b", "seu"),
+                 (r"\bsuos\b", "seus"), (r"\bSuo\b", "Seu"), (r"\bSuos\b", "Seus"),
+                 (r"\bGraças!", "Obrigado!"), (r"\bgraças!", "obrigado!"),
+                 # a place needs "estar": "a princesa é em outro castelo" -> "está em"
+                 (r"\bé (em|no|na|nos|nas|num|numa)\b", r"está \1"), (r"\bÉ (EM|NO|NA|NOS|NAS)\b", r"ESTÁ \1"),
+                 (r"\bsão (em|no|na|nos|nas)\b", r"estão \1"),
+                 # Spanish the second pair does not know and lets through: Portuguese spelling (SELECCIONAR -> SELECIONAR)
+                 (r"(?i)(\w)(c)c(i[oó]n)", r"\1\2\3"), (r"\bLL", "CH"), (r"\bLl", "Ch"), (r"\bll", "ch"), (r"ñ", "nh"), (r"Ñ", "NH")]}
+
+
+def _glossary(language):
+    path_ = os.path.join(DATA, "glossary", f"{language}.json")
+    return json.load(open(path_, encoding="utf-8")) if os.path.exists(path_) else {}
+
+
+@functools.lru_cache(None)
+def _route(p):
+    if os.name == "nt":
+        return p
+    return subprocess.run(["wslpath", "-w", p], capture_output=True, text=True).stdout.strip()
+
+
+def _apertium(text, pairs):
+    if pairs.startswith("neural-"):  # offline neural model (neural.py) into that language, one line per sentence
+        from retro_translator.core.translating import neural
+        lines = [re.sub(r"\s*\.$", "", l) for l in text.split("\n")]
+        return "\n".join(t + " ." for t in neural.translate(lines, SOURCE, pairs.split("-")[1]))
+    for attempt in range(3):  # a program start can fail once under load (WSL interop, antivirus): try again
+        try:
+            return _apertium_rules(text, pairs)
+        except subprocess.CalledProcessError:
+            if attempt == 2:
+                raise
+
+
+def _apertium_rules(text, pairs):
+    value_ = subprocess.run([os.path.join(BIN, "apertium-destxt.exe")], input=text.encode("utf-8"),
+                          capture_output=True, check=True, **_NO_WINDOW).stdout
+    for k, (prog, *args) in enumerate(STEPS[pairs]):
+        args = [_route(os.path.join(APERTIUM_DATA, a)) if os.path.exists(os.path.join(APERTIUM_DATA, a)) else a
+                for a in args]
+        value_ = subprocess.run([os.path.join(BIN, prog + ".exe")] + args, input=value_, capture_output=True,
+                              check=True, **_NO_WINDOW).stdout
+    out_ = subprocess.run([os.path.join(BIN, "apertium-retxt.exe")], input=value_, capture_output=True, check=True, **_NO_WINDOW).stdout
+    return out_.decode("utf-8").strip()
+
+
+def _rare(word, language):
+    """A word the second pair left untranslated that is not a common word of the language ("destreza" is
+    Portuguese too, "parón" is not)."""
+    from wordfreq import zipf_frequency
+    return zipf_frequency(word.lower(), language) < 2.5
+
+
+def _back(spanish, original):
+    """The English word of `original` that the first pair turned into `spanish` (or the Spanish word, if none)."""
+    words = list(dict.fromkeys(re.findall(r"[A-Za-z']+", original)))
+    read_ones = _apertium("\n".join(p.lower() + " ." for p in words), PATH_["es"][0]).split("\n")
+    for p, l in zip(words, read_ones):
+        if re.sub(r"[*#@.\s]", "", l).lower() == spanish.lower():
+            return p
+    return spanish
+
+
+def _terms(language):
+    if language not in _TERMS:
+        path_ = os.path.join(DATA, "rules", f"{language}.terms.json")
+        _TERMS[language] = json.load(open(path_, encoding="utf-8")) if os.path.exists(path_) else {}
+    return _TERMS[language]
+
+
+_TERMS = {}
+
+
+def unknowns(texts, language="pt"):
+    """For each sentence, the words Apertium does not know (marked with *) in the first pair. A single pass."""
+    lines = _apertium("\n".join(" ".join(t.split()).lower() for t in texts), PATH_[language][0]).split("\n")
+    if len(lines) != len(texts):
+        lines = [_apertium(" ".join(t.split()).lower(), PATH_[language][0]) for t in texts]
+    return [re.findall(r"\*(\w+)", l) for l in lines]
+
+
+def _case_like(original, translated_):
+    letters = [c for c in original if c.isalpha()]
+    if letters and all(c.isupper() for c in letters):
+        return translated_.upper()
+    return translated_[:1].upper() + translated_[1:] if original[:1].isupper() else translated_
+
+
+def _rules(language):
+    path_ = os.path.join(DATA, "rules", f"{language}.json")
+    return json.load(open(path_, encoding="utf-8")) if os.path.exists(path_) else {}
+
+
+def translate(text, language="pt"):
+    return translate_batch([text], language)[0]
+
+
+# what game fonts do not have: typographic quotes, ligatures, the French space before ?!:;
+PLAIN = [(r"«\s*", '"'), (r"\s*»", '"'), ("[“”„]", '"'), ("[‘’‚]", "'"), ("œ", "oe"), ("Œ", "OE"), ("æ", "ae"),
+         ("Æ", "AE"), (r"\s+([?!:;])", r"\1")]
+
+
+def _prepare(text):
+    """All-uppercase text in title case: all caps reads as acronyms (MARTY -> marty -> a word)."""
+    t = " ".join(text.split())
+    return " ".join(w[:1] + w[1:].lower() for w in t.split(" ")) if t.upper() == t else t
+
+
+def translate_batch(texts, language="pt", with_rules=True):
+    """Several sentences in a single Apertium pass (one per line): starting the programs is what costs."""
+    # a button label ("A: SELECT LETTER", "C- CANCEL") keeps its letter: alone, "A" is read as an article
+    keys = [re.match(r"[A-Z]\s?[:-]\s+(?=\S)", t) for t in texts]
+    if any(keys):
+        out_ = translate_batch([t[k.end():] if k else t for t, k in zip(texts, keys)], language, with_rules)
+        return [k.group(0) + o if k and o is not None else o for o, k in zip(out_, keys)]
+    gloss = _glossary(language.split("-")[0])  # Portuguese of Portugal shares the Brazilian terms
+    out_ = [None] * len(texts)
+    rest = []
+    for i, t in enumerate(texts):
+        key_ = " ".join(t.lower().split())
+        if SOURCE != "en":  # glossary and learned terms are English keys
+            pass
+        elif key_ in gloss:
+            out_[i] = _case_like(t, gloss[key_])
+        elif _terms(language.split("-")[0]).get(key_):  # menu item in the video game sense (learn_terms.py)
+            out_[i] = _case_like(t, _terms(language.split("-")[0])[key_])
+        if out_[i] is not None:
+            continue
+        if language not in PATH_ or language == SOURCE:
+            out_[i] = t
+        else:
+            rest.append(i)
+    if not rest:
+        return out_
+    # A line break is just a space to Apertium and the transfer moves words from one sentence to another:
+    # " ." at the end of each holds the boundary
+    prepared = [_prepare(texts[i]) for i in rest]
+    current = "\n".join(p + " ." for p in prepared)
+    for k, pairs in enumerate(PATH_[language]):
+        current = _apertium(current, pairs)
+        if k == 0 and len(PATH_[language]) > 1:  # unknown words do not survive the second pair: protect them with our own mark
+            current = re.sub(r"\*(\w+)", lambda m: "QQ" + m.group(1) + "QQ", current)
+    lines = [re.sub(r"\s*\.\s*$", "", l.strip()) for l in current.split("\n")]
+    if len(lines) != len(rest):  # Apertium joined or split lines: sentence by sentence
+        for i in rest:
+            out_[i] = translate_batch([texts[i]], language)[0] if len(rest) > 1 else texts[i]
+        return out_
+    rules = _rules(language)
+    for i, current in zip(rest, lines):
+        if len(PATH_[language]) > 1 and len(texts[i].split()) <= 3 and any(
+                _rare(w, language) for w in re.findall(r"(?<!\*)\*(\w+)", current) if not w.startswith("QQ")):
+            out_[i] = texts[i]  # a short item with a word the second pair lacks would show Spanish ("STOP" -> "PARÓN")
+            continue
+        rare = [w for w in re.findall(r"(?<!\*)\*(\w+)", current) if not w.startswith("QQ") and _rare(w, language)]
+        if rare and len(PATH_[language]) > 1:  # longer text: only that word goes back to the English it came from
+            current = re.sub(r"(?<!\*)\*(\w+)", lambda m: _back(m.group(1), texts[i]) if m.group(1) in rare
+                           else "*" + m.group(1), current)
+        current = re.sub(r"(?i)QQ(\w+?)QQ", r"\1", current)  # unknown words stay as they are (mostly names)
+        current = re.sub(r"[*#@](\w)", r"\1", current).strip()  # unknown word mark: the original word stays
+        for src, to in AFTER.get(language.split("-")[0], []):
+            current = re.sub(src, to, current)
+        if rules and with_rules:  # learned during development (learn_rules.py), general language knowledge
+            from retro_translator.core.translating import learn_rules
+            current = learn_rules.join_(learn_rules.apply(learn_rules.tokens(current, box=True), rules))
+        for src, to in PLAIN:
+            current = re.sub(src, to, current)
+        out_[i] = _case_like(texts[i], current)
+    return out_

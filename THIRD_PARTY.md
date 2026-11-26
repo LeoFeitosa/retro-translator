@@ -5,8 +5,8 @@ The Windows package bundles the following software. Each keeps its own license.
 ## Genesis Plus GX
 
 Mega Drive emulator core, libretro port, commit `f27655b592ef43f317272d79883bcaa10d3ac8ad` of
-<https://github.com/libretro/Genesis-Plus-GX>, with one function added
-(read access to the emulated memory).
+<https://github.com/libretro/Genesis-Plus-GX>, with one function added by Retro Translator
+([retro_translator/consoles/megadrive/core_patch/retro_memory_view.c](retro_translator/consoles/megadrive/core_patch/retro_memory_view.c)).
 
 Copyright (c) 1998-2003 Charles MacDonald, (c) 2007-2026 Eke-Eke, some portions copyright Nicola Salmoria and the MAME
 team. Redistributions may not be sold, nor may they be used in a commercial product or activity. The complete source
@@ -31,11 +31,13 @@ programs' source is at <https://github.com/apertium>.
 
 ## Japanese and Chinese
 
-- Kana to kanji conversion data (`kanji/`) from the [Mozc](https://github.com/google/mozc) open-source dictionary
+- Kana to kanji conversion data (`retro_translator/data/kanji/`) from the [Mozc](https://github.com/google/mozc) open-source dictionary
   (BSD 3-Clause), which is based on IPAdic (mecab-ipadic-2.7.0; IPAdic license) and the Okinawa dictionary; their
   license texts are in Mozc's `src/data/dictionary_oss/README.txt`.
 - Offline neural translation: [M2M100 418M](https://huggingface.co/facebook/m2m100_418M) (MIT license), converted
   to [CTranslate2](https://github.com/OpenNMT/CTranslate2) (MIT); SentencePiece (Apache 2.0).
-- Glyph shapes for reading Japanese and Chinese text: [GNU Unifont](https://unifoundry.com/unifont/) (GPL 2+ with
+- Pixel font of the program's screens and glyph shapes for reading Japanese and Chinese text: [GNU Unifont](https://unifoundry.com/unifont/) (GPL 2+ with
   font embedding exception, or SIL OFL 1.1).
 - Glyph shapes: Shinonome 16-dot font (public domain), from the Electronic Font Open Laboratory.
+- Glyph shapes for 8x8 Japanese text: Misaki font (美咲フォント), Copyright (C) 2002-2021 Num Kadoma; free license:
+  unlimited permission to use, copy and distribute, with or without modification, commercially or not.

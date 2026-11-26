@@ -1,0 +1,18 @@
+# built or downloaded, not versioned (see docs/ARCHITECTURE.md, "Data")
+retro_translator/data/tables
+retro_translator/data/neural
+retro_translator/data/apertium
+retro_translator/consoles/*/lib
+retro_translator/consoles/*/system
+# development workspace at the repository root (tools/ write here)
+gpgx/
+captures/
+memory/
+output/
+rom_log/
+results*.jsonl
+*.log
+.roms
+.venv
+__pycache__/
+.ruff_cache/
