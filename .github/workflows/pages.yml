@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: read  # deploy-pages lists the run's artifacts
   pages: write
   id-token: write
 
