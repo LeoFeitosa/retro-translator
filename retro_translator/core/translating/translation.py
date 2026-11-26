@@ -192,12 +192,48 @@ def _names(text):
 
 def translate_batch(texts, language="pt", with_rules=True):
     """Several sentences in a single Apertium pass (one per line): starting the programs is what costs."""
-    # a button label ("A: SELECT LETTER", "C- CANCEL") keeps its letter: alone, "A" is read as an article
-    keys = [re.match(r"[A-Z]\s?[:-]\s+(?=\S)", t) for t in texts]
+    # a button label ("A: SELECT LETTER", "C- CANCEL", "A:SELECT" with the colon read as a dash) keeps its letter:
+    # alone, "A" is read as an article
+    from wordfreq import zipf_frequency
+    keys = [re.match(r"[A-Z]\s?[:-]\s+(?=\S)|[ABCXYZLR]\s?[:-](?=[A-Z]{2})", t) for t in texts]
+    keys = [k if k and (k.group(0)[-1] != "-" or zipf_frequency(t.split()[0].lower().replace("-", ""), "en") < 1)
+            else None for k, t in zip(keys, texts)]  # "X-RAY" is a word ("xray"), not the X button ("aselect")
+    # the font table may read an apostrophe or a colon as a dash ("CAPTAIN-S NAME-"): the model reads them as they are
+    # meant, and the dash comes back at the end so the game's own glyph draws it
+    dash = [bool(re.search(r"[A-Za-z]-[Ss]\b|[A-Za-z]-$", t)) for t in texts]
+    if any(dash):
+        out_ = translate_batch([re.sub(r"(?<=[A-Za-z])-$", ":", re.sub(r"(?<=[A-Za-z])-(?=[Ss]\b)", "'", t)) if d
+                                else t for t, d in zip(texts, dash)], language, with_rules)
+        return [re.sub(r":$", "-", o) if d and o else o for o, d in zip(out_, dash)]
     if any(keys):
         out_ = translate_batch([t[k.end():] if k else t for t, k in zip(texts, keys)], language, with_rules)
         return [k.group(0) + o if k and o is not None else o for o, k in zip(out_, keys)]
+    item = [len(t.split()) <= 6 and not re.search(r"[.!?,;]", t) for t in texts]  # a menu item, not a sentence
+    # numbers of a menu item as 2, 3, ... in their order and put back after: "SAVE AS GAME 1" and "... GAME 2" come
+    # out alike (each number alone sways the model); 0 and 1 stay, they change the grammar around them
+    nums = [re.findall(r"\d+", t) if i else [] for t, i in zip(texts, item)]
+    plain = [re.sub(r"\d+", lambda m, c=iter(range(2, 99)): str(next(c)), t) if n and all(int(x) > 1 for x in n)
+             and len(set(n)) == len(n) else t for t, n in zip(texts, nums)]
+    if plain != list(texts):
+        out_ = translate_batch(plain, language, with_rules)
+        for i, (o, n, p) in enumerate(zip(out_, nums, plain)):
+            if o is None or p == texts[i]:
+                continue
+            got = re.findall(r"\d+", o)
+            if sorted(got) == [str(k) for k in range(2, 2 + len(n))]:
+                out_[i] = re.sub(r"\d+", lambda m, n=n: n[int(m.group(0)) - 2], o)
+            else:  # the model dropped or doubled a number: the item as it is
+                out_[i] = translate_batch([texts[i]], language, with_rules)[0] if not nums[i] else o
+        return out_
     gloss = _glossary(language.split("-")[0])  # Portuguese of Portugal shares the Brazilian terms
+    # a menu item that starts with a verb of the game glossary ("ERASE GAME 1"): the verb in the game's sense (alone,
+    # the model reads "erase" as switching off), the rest translated
+    verb = [i and len(t.split()) > 1 and re.fullmatch(r"[^\W\d]+(ar|er|ir|re)", gloss.get(t.split()[0].lower(), "") or "")
+            and " ".join(t.lower().split()) not in gloss for t, i in zip(texts, item)]
+    if any(verb):
+        rest = translate_batch([t.split(None, 1)[1] if v else t for t, v in zip(texts, verb)], language, with_rules)
+        return [_case_like(t.split()[0], gloss[t.split()[0].lower()]) + " " + r if v and r is not None else r
+                for t, v, r in zip(texts, verb, rest)]
     out_ = [None] * len(texts)
     rest = []
     for i, t in enumerate(texts):

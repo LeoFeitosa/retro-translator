@@ -98,5 +98,10 @@
  "done": "pronto",
  "cancel": "cancelar",
  "select letter": "escolher letra",
- "enter name": "digite o nome"
+ "enter name": "digite o nome",
+ "erase": "apagar",
+ "delete": "apagar",
+ "copy": "copiar",
+ "overwrite": "sobrescrever",
+ "rename": "renomear"
 }

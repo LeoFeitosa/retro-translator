@@ -103,7 +103,8 @@ def find_codes(rom, found, value, table, n=3):
     """Candidates [(width, base, space, seen positions, code -> learned sign)] for the ROM text, from the collected
     sentences (no replay). value: glyph -> number the ROM stores up to a base (the tile, or the letter in alphabetical order)."""
     from collections import Counter
-    sentences = sorted({t for t in found if None in t and sum(value.get(c) is not None for c in t) >= 8}, key=len)[-40:]
+    sentences = sorted({t for t in found if None in t and sum(value.get(c) is not None for c in t) >= 8},
+                       key=lambda t: (len(t), repr(t)))[-80:]  # ties by content: a set's order changes on every run
     votes, spaces, seen, marks_ = Counter(), {}, {}, {}
     for t in sentences:
         ent = [value.get(c) if c is not None else None for c in t]
@@ -645,7 +646,7 @@ def translate(route, language="pt", out_=None, table=None, ascii_only=False):
                 source.split()[0].lower() in CONTINUES:
             continue  # cut at a glyph the table cannot read (one space at an edge: a letter missing next to it, padding
             # uses more; a contraction without its start, "'LL KEEP"), or it goes on in another message
-        if re.search(r"[.!?]", source) and re.search(r"\S {2,}\S|(^|[.!?] ),", source):
+        if re.search(r"[.!?]", source) and re.search(r"\S {2,}\S|(^|[.!?] ),|(^| )[.,!?;:]", source):
             continue  # a gap where the game inserts a name or a number ("It will cost   Meseta"): the translation
             # cannot keep it in the right place
         if not real_words(source):

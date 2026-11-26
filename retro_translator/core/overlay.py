@@ -17,7 +17,7 @@ from retro_translator import DATA
 _DIC = {}
 
 
-def looks_english(text):
+def looks_english(text, buttons=False):
     """A block with real words (a logo read as letters is not text; a lone name is not translated)."""
     import re
     from retro_translator.core.translating import translation
@@ -25,6 +25,8 @@ def looks_english(text):
         from retro_translator.core.reading import decipher
         _DIC[translation.SOURCE] = decipher.Dictionary(translation.SOURCE)
     dic = _DIC[translation.SOURCE]
+    if buttons:  # on screen, button labels ("A: SELECT", "C-CANCEL"): not loose letters (in ROM bytes they may be noise)
+        text = re.sub(r"(?<![A-Za-z])[A-Z]\s?[:-]\s*(?=[A-Za-z]{2})", " ", text)
     ps = re.findall(r"[^\W\d_]+", text.lower())  # "1PLAYER" counts as "player"
     # a lowercase letter followed by an uppercase one inside a word is machine code read as letters ("NuM": 68000 RTS)
     swapped = {w.lower() for w in re.findall(r"[A-Za-z]+", text) if re.search(r"[a-z][A-Z]", w)}
@@ -68,7 +70,12 @@ def blocks(md, table):
                 break
         else:
             list_.append({"plane": plane, "x": x, "lines": [(y, text, tr)]})
-    return [b for b in list_ if looks_english(" ".join(t for _, t, _ in b["lines"]))]
+    list_ = [b for b in list_ if looks_english(" ".join(t for _, t, _ in b["lines"]), buttons=True)]
+    for b in list_:  # the space of a block ends where another one starts on its rows ("B: DONE   C: CANCEL")
+        rows = {y for y, _, _ in b["lines"]}
+        b["end"] = min([o["x"] for o in list_ if o is not b and o["plane"] == b["plane"] and o["x"] > b["x"]
+                        and rows & {y for y, _, _ in o["lines"]}], default=None)
+    return list_
 
 
 def is_list(block):
@@ -278,7 +285,7 @@ def free_width(md, block):
         if glyph(md.pattern(int(grid[y, x]))).startswith("#"):
             break
         x += 1
-    return x - block["x"]
+    return min(x, block.get("end") or x) - block["x"]
 
 
 def draw_block(md, frame_, block, lines_pt, font_, clean=None):
@@ -341,6 +348,8 @@ def clean_background(md, list_):
         grid = planes[b["plane"]]
         values_, tally = np.unique(grid, return_counts=True)
         blank = values_[np.argmax(tally)]  # no space in the whole block: the most common tile of the plane
+        if b["x"] > 0:  # better, the empty cell just before the text (runs are apart by empty cells): its own box
+            blank = grid[b["lines"][0][0] % grid.shape[0]][b["x"] - 1]
         for y, _, tr in b["lines"]:  # a line without a space uses the space of another line of the block (the box background)
             k = next((k for k, c in enumerate(tr) if c is None), None)
             if k is not None:

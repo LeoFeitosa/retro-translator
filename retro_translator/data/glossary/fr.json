@@ -2,5 +2,17 @@
  "done": "terminé",
  "select letter": "choisir la lettre",
  "enter name": "entrez le nom",
- "cancel": "annuler"
+ "cancel": "annuler",
+ "save": "sauvegarder",
+ "erase": "effacer",
+ "delete": "supprimer",
+ "copy": "copier",
+ "overwrite": "écraser",
+ "load": "charger",
+ "exit": "quitter",
+ "quit": "quitter",
+ "select": "sélectionner",
+ "continue": "continuer",
+ "start": "commencer",
+ "rename": "renommer"
 }

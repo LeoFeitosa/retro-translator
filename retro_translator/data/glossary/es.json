@@ -2,5 +2,17 @@
  "done": "listo",
  "select letter": "elegir letra",
  "enter name": "escribe el nombre",
- "cancel": "cancelar"
+ "cancel": "cancelar",
+ "save": "guardar",
+ "erase": "borrar",
+ "delete": "borrar",
+ "copy": "copiar",
+ "overwrite": "sobrescribir",
+ "load": "cargar",
+ "exit": "salir",
+ "quit": "salir",
+ "select": "seleccionar",
+ "continue": "continuar",
+ "start": "empezar",
+ "rename": "renombrar"
 }

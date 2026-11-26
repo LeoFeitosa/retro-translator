@@ -15,7 +15,7 @@ NAMES = {"en": "English", "pt": "Português (Brasil)", "pt-PT": "Português (Por
 HREFLANG = {"pt": "pt-BR"}  # page key -> hreflang and html lang
 LABEL = {"pt": "PT-BR", "pt-PT": "PT-PT"}
 CURRENT = ' aria-current="page"'
-VIDEO_DATE = "2026-11-25"  # promotional videos (tools/promo.py): assets/video/retro-translator-<page>.mp4
+VIDEO_DATE = "2026-11-26"  # promotional videos (tools/promo.py): assets/video/retro-translator-<page>.mp4
 LOCALE = {"en": "en_US", "pt": "pt_BR", "pt-PT": "pt_PT", "es": "es_ES", "fr": "fr_FR", "ja": "ja_JP"}
 
 TEXT = {
