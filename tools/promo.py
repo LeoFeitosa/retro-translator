@@ -94,15 +94,20 @@ class Recorder:
 
     def events(self):
         self.n += 1
-        if self.phase == "picker":  # one line every 0.7 s down to the video's language, then Enter
-            target = [c for c, _ in texts.LANGUAGES].index(self.lang)
+        if self.phase == "picker":  # the home screen: up to the language, one step every 0.7 s to the video's
+            # language, down to the start button, Enter
             if self.n % 22:
                 return []
+            target = [c for c, _ in texts.LANGUAGES].index(self.lang)
+            if self.moves:
+                return [pygame.event.Event(pygame.KEYDOWN, key=self.moves.pop(0))]
             if self.pos != target:
-                key = pygame.K_DOWN if self.pos < target else pygame.K_UP
-                self.pos += 1 if key == pygame.K_DOWN else -1
-                return [pygame.event.Event(pygame.KEYDOWN, key=key)]
-            return [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN)] if self.n > 40 else []
+                self.pos = (self.pos + 1) % len(texts.LANGUAGES)
+                return [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RIGHT)]
+            if not self.down:
+                self.down = True
+                self.moves = [pygame.K_DOWN, pygame.K_DOWN, pygame.K_RETURN]
+            return []
         if self.phase != "game":
             return []
         try:
@@ -144,7 +149,7 @@ def record(rom, lang):
     preparation.FOLDER = os.path.join(home, ".retro-translator")
     rec = Recorder(lang, preparation.FOLDER)
     real = {"get": pygame.event.get, "flip": pygame.display.flip, "tick": pygame.time.Clock,
-            "choose": window.choose_language, "preparing": window.preparing, "init": pygame.mixer.init,
+            "home": window.home, "check": window.updater.check_update, "preparing": window.preparing, "init": pygame.mixer.init,
             "channel": pygame.mixer.Channel, "sound": pygame.mixer.Sound}
 
     class Clock:
@@ -161,11 +166,11 @@ def record(rom, lang):
         def queue(self, data):
             rec.sound(data)
 
-    def choose(screen, name_=""):
-        saved = os.path.join(preparation.FOLDER, "language.txt")
-        rec.phase, rec.n = "picker", 0
-        rec.pos = [c for c, _ in texts.LANGUAGES].index(open(saved).read().strip()) if os.path.exists(saved) else 0
-        return real["choose"](screen, name_)
+    def home(screen, rom_=None, language=None):
+        saved = window.settings().get("language", "pt")
+        rec.phase, rec.n, rec.down = "picker", 0, False
+        rec.pos, rec.moves = [c for c, _ in texts.LANGUAGES].index(saved), [pygame.K_UP, pygame.K_UP]
+        return real["home"](screen, rom_, language)
 
     def preparing(*a):
         rec.phase, rec.last_shot = "prep", 0.0
@@ -176,7 +181,8 @@ def record(rom, lang):
     pygame.event.get = lambda *a, **k: rec.events()
     pygame.display.flip = lambda: (real["flip"](), rec.flip(pygame.display.get_surface()))
     pygame.time.Clock = Clock
-    window.choose_language, window.preparing = choose, preparing
+    window.home, window.preparing = home, preparing
+    window.updater.check_update = lambda *a: None  # no new version in the video
     pygame.mixer.init, pygame.mixer.Channel = (lambda *a, **k: None), Channel
     pygame.mixer.Sound = lambda buffer=b"": bytes(buffer)
     try:
@@ -186,7 +192,8 @@ def record(rom, lang):
             window.main(rom, None)
     finally:
         pygame.event.get, pygame.display.flip, pygame.time.Clock = real["get"], real["flip"], real["tick"]
-        window.choose_language, window.preparing = real["choose"], real["preparing"]
+        window.home, window.preparing = real["home"], real["preparing"]
+        window.updater.check_update = real["check"]
         pygame.mixer.init, pygame.mixer.Channel, pygame.mixer.Sound = real["init"], real["channel"], real["sound"]
     return rec.frames
 

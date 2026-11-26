@@ -251,6 +251,8 @@ def draw_progress(screen, name_, language, work, seconds):
         if len(line) > 56:  # a long path keeps its end: the folder and the file
             line = f"{t['saved']}: …" + work["saved"][-(53 - len(t["saved"])):]
         write(screen, line, (panel.centerx, view.bottom + 26), GREEN, 2, "center")
+    elif work.get("partial"):  # nothing could be written into the ROM: only what the overlay reads on screen
+        write(screen, t["partial"], (panel.centerx, view.bottom + 26), SILVER, 2, "center")
     else:
         write(screen, t["screen_only"], (panel.centerx, view.bottom + 26), SILVER, 2, "center")
     bar = pygame.Rect(panel.x + 24, panel.bottom - 64, panel.w - 48, 40)
@@ -333,7 +335,7 @@ def refuse(screen, name_, language):
 
 
 def main(rom=None, language=None, test=0):
-    rom = os.path.abspath(rom) if rom else None
+    rom = os.path.abspath(rom) if rom and os.path.isfile(rom) else None  # a moved game: the home screen asks for it
     os.makedirs(preparation.FOLDER, exist_ok=True)
     updater.remove_old_build()
     clear_if_changed()

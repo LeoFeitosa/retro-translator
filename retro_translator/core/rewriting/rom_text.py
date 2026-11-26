@@ -3,6 +3,7 @@ becomes bytes or 16-bit words with a constant offset. With the place found, the 
 inside the ROM itself and the game draws the translation on its own.
 Usage: python -m retro_translator.core.rewriting.rom_text ROM"""
 import os
+import random
 import re
 import sys
 
@@ -357,6 +358,22 @@ def accents(translations):
     return {k: next(iter(v)) for k, v in with_.items() if len(v) == 1 and not without[k]}
 
 
+def sentence_blocks(g):
+    """Running text split into blocks of whole sentences: from a line that starts a sentence to a line that ends
+    one. A game may keep a whole conversation as one message (Phantasy Star II); each block is translated and written
+    in its own lines, and what is left at the end without its sentence end stays as it is."""
+    ends = lambda t: re.search(r"[.!?][\"')]?\s*$", t)
+    blocks, current = [], []
+    for f in g:
+        current.append(f)
+        if ends(f[1]):
+            blocks.append(current)
+            current = []
+    if not blocks:
+        return [g]  # no sentence ends at a line end: the old way (whole_sentences decides)
+    return blocks
+
+
 def whole_sentences(g, lines, width):
     """In running text (it or a line right next to it in the ROM has sentence punctuation) the message must start
     and end a sentence: games that keep each line of a box apart ("I am haunted by" / "nightmares every night.")
@@ -371,11 +388,79 @@ def whole_sentences(g, lines, width):
     return all(ends(t) for t in prev) and (not next_ or ends(texts[0]))
 
 
+def _trim_junk(f, width):
+    """With both cases read, bytes before a message (pointers, codes) read as letters stick to its first word:
+    "chkmAfter going home", "kI am". The first word starts at its last capital when the case changes inside it."""
+    p, t = f
+    lead = len(t) - len(t.lstrip())
+    word = t[lead:].split(" ")[0]
+    if not re.search(r"[a-z][A-Z]|[A-Z]{2}[a-z]", word):
+        return f
+    k = max((i for i, ch in enumerate(word) if ch.isupper() and (i + 1 == len(word) or word[i + 1].islower())),
+            default=None)
+    return f if k is None else (p + (lead + k) * width, t[lead + k:])
+
+
+def _text_stretches(data, marked, width, start):
+    """The ROM stretches that already read as text with the letters known for sure (marked in capitals): the rest of
+    a ROM is code and graphics, which read as letters by chance."""
+    from wordfreq import zipf_frequency
+    out_ = []
+    for p, t in extract(data, marked, width, 2):
+        known = re.findall(r"(?<![A-Za-z])[A-Z]{3,}(?![A-Za-z])", t)
+        if p >= start and len(known) >= 2 and sum(zipf_frequency(w.lower(), "en") >= 3 for w in known) >= 0.7 * len(known):
+            out_.append(t)
+    return out_
+
+
+def proven_by_words(data, code, guessed, width, start):
+    """The guessed letters (by the order of the alphabet) that the ROM's text proves: each one must appear in at
+    least 3 words of real text, 3 in 4 of them real English words. {code: letter} of the ones proven."""
+    from wordfreq import zipf_frequency
+    if not guessed:
+        return {}
+    marked = {**code, **{c: l.upper() for c, l in code.items() if l.isalpha()}, **{c: l.lower() for c, l in guessed.items()}}
+    words = [w for t in _text_stretches(data, marked, width, start) for w in re.findall(r"[A-Za-z]{3,}", t)]
+    ok = {}
+    for c, l in guessed.items():
+        using = [w for w in words if l.lower() in w]
+        if len(using) >= 3 and sum(zipf_frequency(w.lower(), "en") >= 3 for w in using) >= 0.75 * len(using):
+            ok[c] = l
+    return ok
+
+
+def second_case(data, code, width, start):
+    """The other case of the alphabet, which the screen reading folds into one: often the 26 codes right before or
+    after it (Phantasy Star II: capitals at 0x0B, lowercase at 0x25), or 32 away as in ASCII. Accepted only when the ROM's words that use it
+    are real words; the block used more often is the lowercase one. {code: letter in its case}, or {} if unproven."""
+    from wordfreq import zipf_frequency
+    letters_ = {c: l for c, l in code.items() if l.isalpha()}
+    if len(letters_) < 20:
+        return {}
+    for k in (-26, 26, -32, 32):  # right next to it, or as in ASCII
+        other = {c + k: l for c, l in letters_.items() if c + k >= 0 and c + k not in code}
+        if len(other) < 20:
+            continue
+        marked = {**code, **{c: l.upper() for c, l in letters_.items()}, **{c: l.lower() for c, l in other.items()}}
+        texts = _text_stretches(data, marked, width, start)
+        used = [w for t in texts for w in re.findall(r"(?<![A-Za-z])[a-z][A-Z]{2,}(?![A-Za-z])", t)]  # "wHAT"
+        if len(used) < 30 or sum(zipf_frequency(w.lower(), "en") >= 3 for w in used) < 0.75 * len(used):
+            continue
+        n_other = sum(ch.islower() for t in texts for ch in t)
+        n_base = sum(ch.isupper() for t in texts for ch in t)
+        lower, upper = (other, letters_) if n_other > n_base else (letters_, other)
+        return {**{c: l.lower() for c, l in lower.items()}, **{c: l.upper() for c, l in upper.items()}}
+    return {}
+
+
 def real_words(text):
     """Every word of the (English) text exists: a message read with a missing or wrong letter is not translated. A
     short word must be common ("OU", "OST", "TART" are pieces of "YOU", "MOST", "START"); a contraction is judged by its stem."""
     from wordfreq import zipf_frequency
+    cased = any(c.islower() for c in text)  # in mixed case a capitalized word is a name ("Nei", "Paseo")
     for w in re.findall(r"[^\W\d_]+(?:'[^\W\d_]+)?", text):
+        if cased and re.fullmatch(r"[A-Z][a-z]+", w):
+            continue
         stem, _, tail = w.lower().partition("'")
         if tail and tail not in ("s", "t", "ll", "re", "ve", "d", "m"):
             return False
@@ -386,7 +471,40 @@ def real_words(text):
     return True
 
 
-def translate(route, language="pt", out_=None, table=None):
+def ascii_text(data, start):
+    """The game's own English kept in plain ASCII, found without reading the screen (a font drawn in variable
+    width cannot be read tile by tile): its language when there is enough of it (40 stretches of real words),
+    else None. Whether it is what the player sees is proven later by visible()."""
+    from wordfreq import zipf_frequency
+    best = None
+    runs = [r.decode() for r in re.findall(rb"[ -~]{8,}", data[start:]) if b"%" not in r]  # "%d": debug text
+    for language in ("en", "fr", "es"):
+        good = 0
+        for t in runs:
+            ws = re.findall(r"[^\W\d_]{3,}", t)
+            good += len(ws) >= 2 and sum(zipf_frequency(w.lower(), language) >= 3 for w in ws) >= 0.8 * len(ws)
+        if good >= 40 and (best is None or good > 1.3 * best[1]):
+            best = (language, good)
+    return best and best[0]
+
+
+def ascii_shape(data, start):
+    """The plain ASCII text as one more form for translate(): every printable code, written back only with the
+    characters the game already uses (a letter it never shows may not be in its font)."""
+    code = {c: chr(c) for c in range(0x20, 0x7F)}
+    sentences = [f for f in extract(data, code, 1, 2) if f[0] >= start and "%" not in f[1]]
+    from retro_translator.core import overlay
+    groups = [g for g in messages(data, sentences, 1) if overlay.looks_english(" ".join(t for _, t in g))]
+    if not groups:
+        return None
+    used = {data[q] for g in groups for p, t in g for q in range(p, p + len(t))}
+    inv = {chr(c): c for c in sorted(used)}
+    from collections import Counter
+    ends = Counter(data[g[-1][0] + len(g[-1][1]):][:1] for g in groups)
+    return groups, 1, inv, ends.most_common(1)[0][0], sorted(sentences)
+
+
+def translate(route, language="pt", out_=None, table=None, ascii_only=False):
     """Translated ROM (.bin). Returns (path, messages replaced, messages found) or None when no code is found."""
     from retro_translator.core.reading import evaluate
     from retro_translator.core.reading import decipher
@@ -395,13 +513,14 @@ def translate(route, language="pt", out_=None, table=None):
     from collections import Counter
     found, indices = evaluate.collection(route)
     name_ = os.path.splitext(os.path.basename(route))[0]
-    table = table or decipher.read_font(found, indices, exclude=name_)
+    if table is None:
+        table = decipher.read_font(found, indices, exclude=name_)
     console = consoles.for_rom(route)
     data = console.read_rom(route)
     tile = {g: c.most_common(1)[0][0] for g, c in indices.items()}
     letter = {g: ord(l) for g, l in table.items() if l and l.isalpha()}
     shapes = []  # a game may store text in several forms (menus in ASCII, dialog in tiles...): use them all
-    for mode_, value in (("tile", tile), ("letter", letter)):
+    for mode_, value in (("tile", tile), ("letter", letter)) if not ascii_only else ():
         for width, base, space, seen, marks_ in find_codes(data, found, value, table):
             if mode_ == "tile":
                 code = codes(table, indices, width, base, space)
@@ -417,9 +536,15 @@ def translate(route, language="pt", out_=None, table=None):
                 if space is not None:
                     code[space] = " "
                 proven = {l for l in table.values() if l and l.isalpha()}
-                code = {c: l for c, l in code.items() if not l.isalpha() or l in proven}  # a letter only deduced
-                # from the alphabet order may sit elsewhere in this font (Phantasy Star II: "w" written as "u")
+                guessed = {c: l for c, l in code.items() if l.isalpha() and l not in proven}
+                code = {c: l for c, l in code.items() if not l.isalpha() or l in proven}
+                # a letter only deduced from the alphabet order may sit elsewhere in this font (Phantasy Star II:
+                # "w" written as "u"): it is kept only when the ROM's words prove it
+                code.update(proven_by_words(data, code, guessed, width, console.TEXT_START))
+                code.update(second_case(data, code, width, console.TEXT_START))
             sentences = [f for f in extract(data, code, width, 2) if f[0] >= console.TEXT_START]
+            if any(l.islower() for l in code.values()):
+                sentences = [f for f in map(_trim_junk, sentences, [width] * len(sentences)) if f[1]]
             groups = messages(data, sentences, width)
             groups = [g for g in groups if overlay.looks_english(" ".join(t for _, t in g))]  # "BALROG" alone is misleading
             groups = banks(groups, seen)
@@ -430,8 +555,10 @@ def translate(route, language="pt", out_=None, table=None):
                 unread = {t - base for g, ts in indices.items() if g not in table and g.strip("0/") for t in ts}
             else:
                 letters_ = [c for c in range(256 ** width) if 0x41 <= c + base <= 0x5A]  # the other case is often
-                # the 26 codes right before or after (Phantasy Star II: capitals at 0x0B, lowercase at 0x25)
-                unread = {c + k for c in letters_ for k in (-26, 0, 26)} - set(code) - {space}
+                # the 26 codes right before or after (Phantasy Star II: capitals at 0x0B, lowercase at 0x25); once
+                # second_case proved where it is, the codes on the other side are something else (punctuation)
+                cased = any(l.islower() for l in code.values())
+                unread = {c + k for c in letters_ for k in ((0,) if cased else (-26, 0, 26))} - set(code) - {space}
 
             def touches(f):
                 for p, step in ((f[0] - width, -width), (f[0] + len(f[1]) * width, width)):
@@ -456,6 +583,8 @@ def translate(route, language="pt", out_=None, table=None):
                 shapes.append((groups, width, inv, code_end, sorted(sentences)))
                 if os.environ.get("RT_DEBUG"):
                     print("SHAPE", mode_, width, base, space, len(groups), sum(" " in t.strip() for g in groups for _, t in g), flush=True)
+    if ascii_only:  # the screen font could not be read: only the game's plain ASCII text (visible() decides)
+        shapes = [f for f in [ascii_shape(data, console.TEXT_START)] if f]
     # the form that reads the most messages first; another form only keeps what does not overlap bytes already taken
     units, taken = [], set()
     for groups, width, inv, code_end, lines in sorted(shapes, key=lambda f: -len(f[0])):
@@ -486,8 +615,8 @@ def translate(route, language="pt", out_=None, table=None):
                 before, after = data[max(g[0][0] - 2 * width, 0):g[0][0]], data[end(g[-1]):end(g[-1]) + 2 * width]
                 middle = (0 in before and any(32 <= b < 127 for b in data[g[0][0] - 3 * width:g[0][0] - width])) or \
                        (0 in after and any(32 <= b < 127 for b in data[end(g[-1]) + width:end(g[-1]) + 3 * width]))
-                pieces = [g] if not middle and paragraph(g, c) else [[f] for f in g]  # a wider box may not be this
-                # message's box
+                pieces = sentence_blocks(g) if not middle and paragraph(g, c) else [[f] for f in g]  # a wider box
+                # may not be this message's box
                 units += [(u, width, inv, code_end, limit) for u in pieces if whole_sentences(u, lines, width)]
     if not units:
         return None
@@ -514,6 +643,9 @@ def translate(route, language="pt", out_=None, table=None):
                 re.search(r"[,;]$", source) or source.split()[-1].lower() in LINK:
             continue  # cut at a glyph the table cannot read (one space at an edge: a letter missing next to it, padding
             # uses more; a contraction without its start, "'LL KEEP"), or it goes on in another message
+        if re.search(r"[.!?]", source) and re.search(r"\S {2,}\S|(^|[.!?] ),", source):
+            continue  # a gap where the game inserts a name or a number ("It will cost   Meseta"): the translation
+            # cannot keep it in the right place
         if not real_words(source):
             continue  # a word that does not exist: a letter is missing or wrong ("OU HAVE", "LADE SLIPPED")
         if any(c in x for _, x in u for c in "©®™") or "registered" in " ".join(x for _, x in u).lower():
@@ -526,7 +658,7 @@ def translate(route, language="pt", out_=None, table=None):
         if code is None:
             REASONS["does not fit the box"] += 1
             if os.environ.get("RT_DEBUG"):
-                print("NAOCABE", len(u), limit, repr(" / ".join(x for _, x in u)), "->", repr(t), flush=True)
+                print("NOFIT", len(u), limit, repr(" / ".join(x for _, x in u)), "->", repr(t), flush=True)
         free_space["text"] = {c.to_bytes(width, "big") for c in inv.values()}
         if code is not None and relocate(rom, data, u, code, width, code_end, free_space):
             done += 1
@@ -544,6 +676,30 @@ def translate(route, language="pt", out_=None, table=None):
 AFTER_GAME = 120  # frames: ROM checks run on power-up
 
 
+def screens(route, translated=None):
+    """A fingerprint of the screen every 20 frames of ~8 min of play with buttons in a fixed order (the same for
+    the original and the translation; with `translated`, written into memory after start-up)."""
+    import zlib
+    console = consoles.for_rom(route)
+    m, rnd, v = console.Emulator(route), random.Random(3), []
+    for i in range(1500):
+        if translated and i == AFTER_GAME // 20:
+            m.write_rom(open(translated, "rb").read(), bytes(console.read_rom(route)))
+        b = rnd.choice(["A", "B", "START", "A", "B", "UP", "DOWN", "LEFT", "RIGHT", None, None])
+        m.run_frames(4, [b] if b else [])
+        m.run_frames(16)
+        v.append(zlib.crc32(m.frame.tobytes()))
+    return v
+
+
+def visible(original, translated, memory=False):
+    """The translation shows on screen: played the same way, some screen differs from the original's. Without it a
+    game would be called translated while the player sees nothing change (text the game never shows)."""
+    a = _brightness_in_process(original, mode="--screens")
+    b = _brightness_in_process(*((original, translated) if memory else (translated,)), mode="--screens")
+    return bool(a and b) and a != b
+
+
 def brightness(route, translated=None):
     """Average screen brightness at 10 points of the first ~2 min pressing START (own process: the core opens
     one ROM per process). With `translated`, boots the original and writes the translation into memory after start-up."""
@@ -559,12 +715,12 @@ def brightness(route, translated=None):
     return v
 
 
-def _brightness_in_process(*roms):
+def _brightness_in_process(*roms, mode="--brightness"):
     import subprocess
     if getattr(sys, "frozen", False):  # in the exe, the program itself measures
-        cmd = [sys.executable, "--brightness", *roms]
+        cmd = [sys.executable, mode, *roms]
     else:
-        cmd = [sys.executable, "-m", "retro_translator", "--brightness", *roms]
+        cmd = [sys.executable, "-m", "retro_translator", mode, *roms]
     root = os.path.dirname(HERE)  # the folder that holds the package
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
                        env={**os.environ, "PYTHONPATH": root})  # the package is found from any working folder

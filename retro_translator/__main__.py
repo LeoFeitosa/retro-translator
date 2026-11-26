@@ -13,6 +13,8 @@ from retro_translator.core.rewriting import rom_text
 def run(args):
     if args[:1] == ["--brightness"]:  # internal: the screen measured in a separate process (rom_text.link_)
         print(rom_text.brightness(*args[1:3]))
+    elif args[:1] == ["--screens"]:  # internal: the screen fingerprints (rom_text.visible)
+        print(rom_text.screens(*args[1:3]))
     elif args[:1] == ["--test"]:
         os.environ["SDL_VIDEODRIVER"] = "dummy"
         window.main(args[1], args[2] if len(args) > 2 else "pt", test=6000)

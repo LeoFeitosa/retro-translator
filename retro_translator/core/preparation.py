@@ -44,14 +44,19 @@ def learn_font(rom, name_, work):
             language = "ja"
         else:
             map_ = {}
+        ascii_ = None
         if not (trusted or language == "ja"):
             report_unreadable(rom, language, guessed, table, evidence, found)
-        json.dump({"language": language, "table": table, "trusted": trusted or language == "ja", "cjk": {g.hex(): c for g, c in map_.items()}},
-                  open(path_, "w", encoding="utf-8"))
+            console = consoles.for_rom(rom)  # a font drawn in variable width: maybe its text is plain ASCII
+            ascii_ = rom_text.ascii_text(console.read_rom(rom), console.TEXT_START)
+            language = ascii_ or language
+        json.dump({"language": language, "table": table, "trusted": trusted or language == "ja", "ascii": bool(ascii_),
+                   "cjk": {g.hex(): c for g, c in map_.items()}}, open(path_, "w", encoding="utf-8"))
     value_ = json.load(open(path_, encoding="utf-8"))
     overlay.translation.SOURCE = value_["language"]
     CJK["map"] = {bytes.fromhex(g): c for g, c in value_.get("cjk", {}).items()}
     work["unreadable"] = not value_.get("trusted", False)
+    work["ascii"] = value_.get("ascii", False)  # unreadable on screen, its plain ASCII text translated instead
     return value_["table"]
 
 
@@ -89,7 +94,7 @@ def prepare(rom, name_, language, work, folder=None):
     """Everything the first time needs: learns the font and, for a Latin game, writes the translated ROM."""
     try:
         table = learn_font(rom, name_, work)
-        if work["unreadable"]:  # a wrong letter table gives a broken translation: better none
+        if work["unreadable"] and not work["ascii"]:  # a wrong letter table gives a broken translation: better none
             return
         work["japanese"] = overlay.translation.SOURCE in ("ja", "zh")
         translated = os.path.join(FOLDER, f"{name_}.{language}.bin")
@@ -100,9 +105,11 @@ def prepare(rom, name_, language, work, folder=None):
         elif not os.path.exists(translated):
             try:  # text found in the ROM is replaced right there: the game draws the translation itself
                 step(work, "translate")
-                mode_ = rom_text.translate(rom, language, translated, table)
+                mode_ = rom_text.translate(rom, language, translated, table, ascii_only=work["ascii"])
                 step(work, "test")
                 mode_ = mode_ and mode_[1] and rom_text.link_(rom, translated)  # nothing written: not translated
+                if mode_ and work["ascii"] and not rom_text.visible(rom, translated, mode_ == "memory"):
+                    mode_ = False  # text the player never sees (debug menus): not a translation
                 if mode_ == "memory":
                     open(translated + ".memory", "w").close()
                 if not mode_:
@@ -114,6 +121,11 @@ def prepare(rom, name_, language, work, folder=None):
             except Exception as e:
                 print("ROM not translated:", e, flush=True)
                 translated = rom
+        if work["ascii"] and translated == rom:  # nothing visible could be translated: refused, as unreadable
+            return
+        # a Latin game whose ROM could not be rewritten: only the overlay translates, and only what it reads whole
+        work["partial"] = translated == rom and not work["japanese"]
+        work["unreadable"] = False
         if folder and translated != rom and not os.path.exists(translated + ".memory"):
             os.makedirs(folder, exist_ok=True)  # a copy for any emulator, the same kind of file that came in
             work["saved"] = os.path.join(folder, f"{title(name_)} ({language}){os.path.splitext(rom)[1]}")

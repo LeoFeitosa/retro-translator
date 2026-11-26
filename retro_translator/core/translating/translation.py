@@ -180,6 +180,16 @@ def _prepare(text):
     return " ".join(w[:1] + w[1:].lower() for w in t.split(" ")) if t.upper() == t else t
 
 
+def _names(text):
+    """In mixed case a capitalized word inside a sentence that English barely uses is a name ("the one called Nei"):
+    our mark keeps it from being translated."""
+    if text.upper() == text:
+        return text
+    from wordfreq import zipf_frequency
+    return re.sub(r"(?<![.!?]\s)(?<=\s)[A-Z][a-z]+\b",
+                  lambda m: "QQ" + m.group(0) + "QQ" if zipf_frequency(m.group(0).lower(), "en") < 3 else m.group(0), text)
+
+
 def translate_batch(texts, language="pt", with_rules=True):
     """Several sentences in a single Apertium pass (one per line): starting the programs is what costs."""
     # a button label ("A: SELECT LETTER", "C- CANCEL") keeps its letter: alone, "A" is read as an article
@@ -208,12 +218,12 @@ def translate_batch(texts, language="pt", with_rules=True):
         return out_
     # A line break is just a space to Apertium and the transfer moves words from one sentence to another:
     # " ." at the end of each holds the boundary
-    prepared = [_prepare(texts[i]) for i in rest]
+    prepared = [_names(_prepare(texts[i])) for i in rest]
     current = "\n".join(p + " ." for p in prepared)
     for k, pairs in enumerate(PATH_[language]):
         current = _apertium(current, pairs)
         if k == 0 and len(PATH_[language]) > 1:  # unknown words do not survive the second pair: protect them with our own mark
-            current = re.sub(r"\*(\w+)", lambda m: "QQ" + m.group(1) + "QQ", current)
+            current = re.sub(r"\*(?!QQ)(\w+)", lambda m: "QQ" + m.group(1) + "QQ", current)
     lines = [re.sub(r"\s*\.\s*$", "", l.strip()) for l in current.split("\n")]
     if len(lines) != len(rest):  # Apertium joined or split lines: sentence by sentence
         for i in rest:
