@@ -14,5 +14,9 @@
  "select": "seleccionar",
  "continue": "continuar",
  "start": "empezar",
- "rename": "renombrar"
+ "rename": "renombrar",
+ "hello": "hola",
+ "hostile": "hostil",
+ "game over": "fin del juego",
+ "the end": "fin"
 }

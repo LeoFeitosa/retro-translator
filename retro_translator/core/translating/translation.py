@@ -174,20 +174,54 @@ PLAIN = [(r"«\s*", '"'), (r"\s*»", '"'), ("[“”„]", '"'), ("[‘’‚]",
          ("Æ", "AE"), (r"\s+([?!:;])", r"\1")]
 
 
+@functools.lru_cache(maxsize=8192)
+def _unknown(word):
+    """A word the English dictionary does not have: a name ("Mardan", "Layton"), not a rare word ("coughs")."""
+    from retro_translator.core.reading import decipher
+    global _DIC
+    if _DIC is None:
+        _DIC = decipher.Dictionary("en")
+    return _DIC(word.lower()) <= -3
+
+
+_DIC = None
+
+
 def _prepare(text):
-    """All-uppercase text in title case: all caps reads as acronyms (MARTY -> marty -> a word)."""
+    """All-uppercase text in sentence case (all caps reads as acronyms; title case made every word a name to the
+    model: "Identify Yourselves" -> "Enterprises"). A word English does not use stays capitalized: a name."""
     t = " ".join(text.split())
-    return " ".join(w[:1] + w[1:].lower() for w in t.split(" ")) if t.upper() == t else t
+    if t.upper() != t:
+        return t
+    out_, start = [], True
+    for w in t.split(" "):
+        core = re.sub(r"[^A-Za-z]", "", w.split("'")[0])
+        low = w.lower()
+        if start or core == "I" or (len(core) >= 3 and _unknown(core)):
+            low = re.sub(r"[a-z]", lambda m: m.group(0).upper(), low, count=1)
+        out_.append(low)
+        start = bool(re.search(r"[.!?:]$", w))
+    return " ".join(out_)
 
 
 def _names(text):
-    """In mixed case a capitalized word inside a sentence that English barely uses is a name ("the one called Nei"):
-    our mark keeps it from being translated."""
+    """A capitalized word that English barely uses is a name ("the one called Nei"; "MARDAN" even at the start of a
+    sentence): our mark keeps it from being translated."""
     if text.upper() == text:
         return text
     from wordfreq import zipf_frequency
-    return re.sub(r"(?<![.!?]\s)(?<=\s)[A-Z][a-z]+\b",
-                  lambda m: "QQ" + m.group(0) + "QQ" if zipf_frequency(m.group(0).lower(), "en") < 3 else m.group(0), text)
+
+    def mark(m):
+        start = not text[:m.start()].strip() or re.search(r"[.!?]\s*$", text[:m.start()])
+        f = zipf_frequency(m.group(0).lower(), "en")
+        return "QQ" + m.group(0) + "QQ" if f < 2 and len(m.group(0)) >= 3 or (f < 3 and not start) else m.group(0)
+    return re.sub(r"\b[A-Z][a-z]+\b", mark, text)
+
+
+def _tail(text):
+    """The ending punctuation of a text ("...", "!", "?"): the model drops or changes it ("Respond." -> "Responda →")."""
+    m = re.search(r"[.!?…]+$", text)
+    return m.group(0) if m else ""
 
 
 def translate_batch(texts, language="pt", with_rules=True):
@@ -246,15 +280,18 @@ def translate_batch(texts, language="pt", with_rules=True):
             out_[i] = _case_like(t, _terms(language.split("-")[0])[key_])
         if out_[i] is not None:
             continue
-        if language not in PATH_ or language == SOURCE:
-            out_[i] = t
+        if language not in PATH_ or language == SOURCE or (re.fullmatch(r"[A-Za-z]{3,}", t.strip()) and
+                                                         _unknown(t.strip())):
+            out_[i] = t  # a name alone ("MARDAN") stays as it is: translated, it gets an article ("EL MARDAN")
         else:
             rest.append(i)
     if not rest:
         return out_
     # A line break is just a space to Apertium and the transfer moves words from one sentence to another:
     # " ." at the end of each holds the boundary
-    prepared = [_names(_prepare(texts[i])) for i in rest]
+    tails = {i: _tail(texts[i]) for i in rest}  # put back as they came after the model
+    prepared = [_names(_prepare(texts[i][:len(texts[i]) - len(tails[i])] if tails[i] and texts[i].strip(".!?…")
+                                else texts[i])) for i in rest]
     current = "\n".join(p + " ." for p in prepared)
     for k, pairs in enumerate(PATH_[language]):
         current = _apertium(current, pairs)
@@ -276,6 +313,9 @@ def translate_batch(texts, language="pt", with_rules=True):
             current = re.sub(r"(?<!\*)\*(\w+)", lambda m: _back(m.group(1), texts[i]) if m.group(1) in rare
                            else "*" + m.group(1), current)
         current = re.sub(r"(?i)QQ(\w+?)QQ", r"\1", current)  # unknown words stay as they are (mostly names)
+        for w in re.findall(r"QQ(\w+?)QQ", prepared[rest.index(i)]):  # the model may mangle the mark ("MardanQ")
+            current = re.sub(rf"(?i)Q*{re.escape(w)}Q*", w, current)
+        current = re.sub(r"Q{2,}", "", current)
         current = re.sub(r"[*#@](\w)", r"\1", current).strip()  # unknown word mark: the original word stays
         for src, to in AFTER.get(language.split("-")[0], []):
             current = re.sub(src, to, current)
@@ -284,5 +324,16 @@ def translate_batch(texts, language="pt", with_rules=True):
             current = learn_rules.join_(learn_rules.apply(learn_rules.tokens(current, box=True), rules))
         for src, to in PLAIN:
             current = re.sub(src, to, current)
+        if tails[i] and texts[i].strip(".!?…"):
+            current = re.sub(r"[\s.!?…→:;,]+$", "", current) + tails[i]
+        elif not tails[i]:  # no full stop in the text (a line of a longer message): none added
+            current = re.sub(r"\s*[.…→]+$", "", current)
+        if len(texts[i].split()) == 1 and len(current.split()) == 2:  # a lone word gains no article ("O ANDROID")
+            current = re.sub(r"(?i)^(o|a|os|as|el|la|los|las|le|les|un|une|uma|um)\s+", "", current)
+        doubled = re.search(r"(?i)\b(\w{3,}) \1\b", current)  # "TÍTULO TÍTULO": the model stuttered
+        if doubled and not re.search(r"(?i)\b(\w{3,}) \1\b", texts[i]):
+            current = texts[i]
+        if len(texts[i].split()) >= 6 and len(current.split()) < 0.4 * len(texts[i].split()):
+            current = texts[i]  # the model collapsed ("THE THRYNN CONCERN THEMSELVES ..." -> "THRYNN."): the original
         out_[i] = _case_like(texts[i], current)
     return out_

@@ -103,5 +103,7 @@
  "delete": "apagar",
  "copy": "copiar",
  "overwrite": "sobrescrever",
- "rename": "renomear"
+ "rename": "renomear",
+ "hello": "olá",
+ "hostile": "hostil"
 }

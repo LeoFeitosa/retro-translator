@@ -75,3 +75,24 @@ def remove_old_build():
             os.remove(old)
         except OSError:
             pass
+    remove_stale_unpacks()
+
+
+def remove_stale_unpacks():
+    """A run that crashed or was killed leaves its unpacked copy (~700 MB, _MEI* in the temporary folder): the ones of
+    this program, older than a day, go. One in use cannot be deleted, so a running copy is never touched."""
+    import glob
+    import shutil
+    import time
+    here = getattr(sys, "_MEIPASS", None)
+    if not here:
+        return
+    for d in glob.glob(os.path.join(os.path.dirname(here), "_MEI*")):
+        if os.path.normcase(d) == os.path.normcase(here) or time.time() - os.path.getmtime(d) < 86400:
+            continue
+        if os.path.isdir(os.path.join(d, "retro_translator")) or os.path.isdir(os.path.join(d, "apertium")):
+            try:  # Windows refuses to rename a folder with a file in use: a copy still open keeps its files
+                os.rename(d, d + "-old")
+            except OSError:
+                continue
+            shutil.rmtree(d + "-old", ignore_errors=True)
