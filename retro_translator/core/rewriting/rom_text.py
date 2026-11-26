@@ -185,6 +185,7 @@ def paragraph(group, box=0):
 LINK = set("the a an to of in on at for with and or but your my his her their our its this that is are was be "
               "you i we he she they it from by as since than like into about while when if so not will would can "
               "have has had were".split())
+CONTINUES = {"to", "of", "and", "or", "but", "than", "nor", "into"}  # a piece that starts with one goes on from another
 
 
 ARTICLES = {"o", "a", "os", "as", "um", "uma", "uns", "umas", "el", "la", "los", "las", "un", "una",
@@ -640,7 +641,8 @@ def translate(route, language="pt", out_=None, table=None, ascii_only=False):
                                                      and re.search(r"[.!?:\"')]$", source)):
             continue  # a piece of a longer sentence: alone, its translation mixes with the English around it
         if re.match(r" \S|'\w", u[0][1]) or re.search(r"\S $", u[-1][1]) or \
-                re.search(r"[,;]$", source) or source.split()[-1].lower() in LINK:
+                re.search(r"[,;]$", source) or source.split()[-1].lower() in LINK or \
+                source.split()[0].lower() in CONTINUES:
             continue  # cut at a glyph the table cannot read (one space at an edge: a letter missing next to it, padding
             # uses more; a contraction without its start, "'LL KEEP"), or it goes on in another message
         if re.search(r"[.!?]", source) and re.search(r"\S {2,}\S|(^|[.!?] ),", source):

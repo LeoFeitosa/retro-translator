@@ -2,6 +2,7 @@
 on the emulator image using the game's own font (accents built on top of the base letter)."""
 import functools
 import json
+import re
 import os
 import unicodedata
 from retro_translator.core.translating import translation
@@ -72,7 +73,9 @@ def blocks(md, table):
 
 def is_list(block):
     """Menu/list: short independent lines; otherwise prose that continues from one line to the next."""
-    return all(len(t) <= 12 for _, t, _ in block["lines"])
+    lines = [t for _, t, _ in block["lines"]]
+    # a menu with longer items ("COPY GAME 1 TO GAME 2"): several lines and no punctuation anywhere (prose ends somewhere)
+    return all(len(t) <= 12 for t in lines) or (len(lines) > 1 and not any(re.search(r"[.!?,;]", t) for t in lines))
 
 
 class Overlay:
