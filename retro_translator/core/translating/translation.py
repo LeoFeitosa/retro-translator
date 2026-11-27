@@ -118,6 +118,15 @@ def _apertium_rules(text, pairs):
     return out_.decode("utf-8").strip()
 
 
+def _invented(source, got, language):
+    """The small model sometimes makes up a word ("NÁVIGO" for navigator): a word of the answer that the language does
+    not have and that is not in the original (a name) sends the line to the usual translator."""
+    from wordfreq import zipf_frequency
+    kept = set(re.findall(r"[^\W\d_]+", source.lower()))
+    return any(w not in kept and zipf_frequency(w, language.split("-")[0]) == 0
+               for w in re.findall(r"[^\W\d_]{3,}", got.lower()))
+
+
 def _rare(word, language):
     """A word the second pair left untranslated that is not a common word of the language ("destreza" is
     Portuguese too, "parón" is not)."""
@@ -294,7 +303,7 @@ def translate_batch(texts, language="pt", with_rules=True):
         except OSError:  # the engine did not start: the usual way
             done_ = [None] * len(rest)
         for i, got in zip(list(rest), done_):
-            if got:
+            if got and not _invented(texts[i], got, language):
                 out_[i] = _case_like(texts[i], got)
                 rest.remove(i)
         if not rest:

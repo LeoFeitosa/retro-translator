@@ -5,6 +5,7 @@ import atexit
 import hashlib
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -117,27 +118,50 @@ def _start():
     return port
 
 
+def _ask(port, prompt, tokens):
+    body = {"messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": tokens,
+            "chat_template_kwargs": {"enable_thinking": False}}  # the answer itself, no reasoning first
+    r = urllib.request.urlopen(urllib.request.Request(
+        f"http://127.0.0.1:{port}/v1/chat/completions", json.dumps(body).encode(),
+        {"Content-Type": "application/json"}), timeout=600)
+    return json.load(r)["choices"][0]["message"]["content"].strip()
+
+
 def translate(texts, language, source="en"):
-    """Each text in `language` (None where it failed), with the instructions that tested best on game text."""
+    """Each text in `language` (None where it failed). The texts come in screen or ROM order, so they go together as a
+    numbered list: the neighbours give the sense a line alone lacks ("DISTRESS" next to "FRIENDLY", "HOSTILE" is a
+    signal, not suffering), and one request per group is faster than one per line."""
     port = _start()
-    # the instructions word for word as tested: a small change made the small model worse ("A party come e come")
-    out_ = []
-    for text in texts:
-        name_s, name_d = NAMES.get(source, source), NAMES.get(language, language)
-        prompt = (f"You are a professional {name_s} ({source}) to {name_d} ({language}) translator. Your goal is to "
-                  f"accurately convey the meaning and nuances of the original {name_s} text while adhering to {name_d} "
-                  "grammar, vocabulary, and cultural sensitivities. The text is from a retro video game: keep character "
-                  "and place names unchanged, keep it short, and keep the same capitalization style. Produce only the "
-                  f"{name_d} translation, without any additional explanations or commentary. Please translate the "
-                  f"following {name_s} text into {name_d}:\n\n\n{text}")
-        body = {"messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": 256,
-                "chat_template_kwargs": {"enable_thinking": False}}  # the answer itself, no reasoning first
+    name_s, name_d = NAMES.get(source, source), NAMES.get(language, language)
+    # the instructions tested on game text: a small change made the small model worse ("A party come e come")
+    head = (f"You are a professional {name_s} ({source}) to {name_d} ({language}) translator. Your goal is to accurately "
+            f"convey the meaning and nuances of the original {name_s} text while adhering to {name_d} grammar, "
+            "vocabulary, and cultural sensitivities. The text is from a retro video game: keep character and place names "
+            f"unchanged, keep it short, and keep the same capitalization style. Produce only the {name_d} translation, "
+            "without any additional explanations or commentary. ")
+    out_ = [None] * len(texts)
+    single = [i for i, t in enumerate(texts) if "\n" in t]  # a text of several lines would break the numbering
+    lines = [i for i in range(len(texts)) if i not in single]
+    for k in range(0, len(lines), 16):
+        part = lines[k:k + 16]
         try:
-            r = urllib.request.urlopen(urllib.request.Request(
-                f"http://127.0.0.1:{port}/v1/chat/completions", json.dumps(body).encode(),
-                {"Content-Type": "application/json"}), timeout=300)
-            answer = json.load(r)["choices"][0]["message"]["content"].strip()
-            out_.append(answer.splitlines()[0].strip() if "\n" not in text and answer else answer or None)
+            answer = _ask(port, head + "The lines are text of the same game screen. Translate each numbered line, keep "
+                          "the numbering, one line each:\n\n" + "\n".join(f"{n + 1}. {texts[i]}"
+                                                                        for n, i in enumerate(part)),
+                          64 + 48 * len(part))
         except Exception:
-            out_.append(None)
+            single += part
+            continue
+        got = {int(m.group(1)): m.group(2).strip() for m in re.finditer(r"^\s*(\d+)\.\s*(.*)$", answer, re.M)}
+        for n, i in enumerate(part):
+            if got.get(n + 1):
+                out_[i] = got[n + 1]
+            else:
+                single.append(i)  # the model skipped or merged it: alone
+    for i in single:
+        try:
+            out_[i] = _ask(port, head + f"Please translate the following {name_s} text into {name_d}:\n\n\n{texts[i]}",
+                           256) or None
+        except Exception:
+            pass
     return out_
