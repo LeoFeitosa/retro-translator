@@ -849,7 +849,8 @@ def link_(original, translated):
     # and write the translation into memory after start-up), all measured at the same time on other cores
     files = []
     for k, version in enumerate(versions(trans)):
-        files.append(f"{translated}.try{k}")
+        base, ext = os.path.splitext(translated)
+        files.append(f"{base}.try{k}{ext}")  # the console is chosen by the extension
         open(files[-1], "wb").write(version)
     open(translated, "wb").write(trans)
     try:

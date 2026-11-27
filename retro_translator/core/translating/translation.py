@@ -277,6 +277,9 @@ def translate_batch(texts, language="pt", with_rules=True):
         rest = translate_batch([t.split(None, 1)[1] if v else t for t, v in zip(texts, verb)], language, with_rules)
         return [_case_like(t.split()[0], gloss[t.split()[0].lower()]) + " " + r if v and r is not None else r
                 for t, v, r in zip(texts, verb, rest)]
+    from wordfreq import zipf_frequency
+    from retro_translator.core.translating import ai
+    with_ai, lone = ai.ENABLED and ai.ready(), set()
     out_ = [None] * len(texts)
     rest = []
     for i, t in enumerate(texts):
@@ -289,23 +292,35 @@ def translate_batch(texts, language="pt", with_rules=True):
             out_[i] = _case_like(t, _terms(language.split("-")[0])[key_])
         if out_[i] is not None:
             continue
-        if language not in PATH_ or language == SOURCE or (re.fullmatch(r"[A-Za-z]{3,}", t.strip()) and
-                                                         _unknown(t.strip())):
-            out_[i] = t  # a name alone ("MARDAN") stays as it is: translated, it gets an article ("EL MARDAN")
+        if language not in PATH_ or language == SOURCE:
+            out_[i] = t
+        elif re.fullmatch(r"[A-Za-z]{3,}", t.strip()) and _unknown(t.strip()):
+            # a name alone ("MARDAN") stays as it is: the usual way turns names into words ("Nei" -> "Não"); the AI
+            # sees the rest of the screen and keeps names, so with it a rare word ("OBSEQUIOUS") gets translated
+            if with_ai:
+                lone.add(i)
+                rest.append(i)
+            else:
+                out_[i] = t
         else:
             rest.append(i)
     if not rest:
         return out_
-    from retro_translator.core.translating import ai
-    if ai.ENABLED and ai.ready():  # the player chose the AI: it translates, the usual way covers what it fails
+    if with_ai:  # the player chose the AI: it translates, the usual way covers what it fails
         try:
             done_ = ai.translate([texts[i] for i in rest], language, SOURCE)
         except OSError:  # the engine did not start: the usual way
             done_ = [None] * len(rest)
         for i, got in zip(list(rest), done_):
+            word = got and re.fullmatch(r"\W*([^\W\d_]+)\W*", got)
+            if i in lone and not (word and zipf_frequency(word.group(1).lower(), language.split("-")[0]) >= 1.5):
+                got = texts[i]  # not one real word of the language: the name as it is
             if got and not _invented(texts[i], got, language):
                 out_[i] = _case_like(texts[i], got)
                 rest.remove(i)
+        for i in lone & set(rest):
+            out_[i] = texts[i]
+            rest.remove(i)
         if not rest:
             return out_
     # A line break is just a space to Apertium and the transfer moves words from one sentence to another:
