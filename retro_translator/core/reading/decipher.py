@@ -496,9 +496,29 @@ def confirmed(table, found, language, evidence=None):
             if len(word) >= 3 and zipf_frequency(word.lower(), language) >= 3:
                 closes[c] += 1
     kept = {g: l for g, l in kept.items() if l.isalnum() or closes[g] >= MIN_WORDS}
+    kept = case_by_height(kept)
     if evidence is not None:
         evidence.update({g: sorted(w) for g, w in words.items()})
     return kept
+
+
+def case_by_height(table):
+    """Upper or lower case from the drawing: the dictionary reads words in any case, so "e" and "E" are the same to
+    it. A small letter without an ascender (a, e, o, p...) starts below the top of the capitals of the same font
+    (40 games: letters in the wrong case 21 -> 11)."""
+    rows = lambda g: np.flatnonzero(mask(g).any(1))
+    top = lambda g: int(rows(g)[0]) if len(rows(g)) else None
+    caps = [g for g, l in table.items() if l in "BDEFHIKLMNPRT" and mask(g).shape[0] == 8 and top(g) is not None]
+    if len(caps) < 3:
+        return table
+    cap, base = int(np.median([top(g) for g in caps])), int(np.median([rows(g)[-1] for g in caps]))
+    # capitals of one font may differ by a pixel (Phantasy Star II: A, C, E are a pixel lower than B, D, F): a
+    # pixel decides only in a font that really has small letters, seen by a tail below the line (p, g, y)
+    tails = any(l in "gjpqy" and mask(g).shape[0] == 8 and len(rows(g)) and rows(g)[-1] > base for g, l in table.items())
+    step = 1 if tails else 2
+    return {g: (l.lower() if top(g) >= cap + step else l.upper())
+            if l.lower() in "acemnorsuvwxzpgqy" and mask(g).shape[0] == 8 and top(g) is not None else l
+            for g, l in table.items()}
 
 
 def trusted(table):
