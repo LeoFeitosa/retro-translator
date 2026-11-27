@@ -157,7 +157,7 @@ def with_accent(m, marks):
 
 class Font:
     def __init__(self, table):
-        self.glyphs = {}
+        self.table, self.glyphs = table, {}
         for g, letter in table.items():
             m = _mask(g)
             # ponytail: only the 8x8 font is redrawn; the 8x16 one is read but not redrawn yet
@@ -337,6 +337,40 @@ def draw_block(md, frame_, block, lines_pt, font_, clean=None):
                 m = squeeze(m, advance)
             if py + 8 <= alt and px + m.shape[1] <= width_px:
                 frame_[py:py + 8, px:px + m.shape[1]][m] = np.broadcast_to(row_color[:, None], m.shape + (3,))[m]
+
+
+def card(lines, font_, size=(224, 320)):
+    """A screen of its own with lines centred in the game's font (grey on black): shown before the game starts, it
+    covers nothing of the game. A font with capitals only gets capitals."""
+    alt, width = size
+    # the credit must be legible: a letter of the game's font is used only when it looks like that letter (a misread
+    # table draws "I" as "7"); when many do not, the whole card uses the common game font, never a mix of guesses
+    from retro_translator.core.reading import cjk
+    ref = _unifont_latin()
+    looks = lambda l: l not in ref or float(cjk._blur(font_.glyphs[l].astype(np.float32)).ravel()
+                                            @ cjk._blur(ref[l]).ravel()) >= 0.4
+    good = {l for l in font_.own if l.isalpha() and looks(l)}
+    if len(good) < 10 or len(good) < 0.8 * sum(l.isalpha() for l in font_.own):
+        font_ = Font({})  # plain letters (GNU Unifont): guesses from other games are not legible enough here
+        font_.glyphs = {l: m > 0 for l, m in ref.items()}
+        font_.own = set(font_.glyphs)
+    else:
+        font_ = Font({g: l for g, l in font_.table.items() if l in good or not l.isalpha()})
+    upper = not any(c.islower() for c in font_.own) and bool(font_.own)
+    lines = [t.upper() if upper else t for t in lines]
+    img = np.zeros((alt, width, 3), np.uint8)
+    y = alt - 12 * len(lines) - 16  # discreet: grey, at the foot of the screen
+    for text in lines:
+        advance = next((a for a in (8, 7, 6) if len(text) * a <= width - 16), 6)
+        x = (width - len(text) * advance) // 2
+        for ch in text:
+            m = font_[ch]
+            m = squeeze(m, advance) if advance < 8 else m
+            if x + m.shape[1] <= width:
+                img[y:y + 8, x:x + m.shape[1]][m] = 150
+            x += advance
+        y += 12
+    return img
 
 
 def clean_background(md, list_):

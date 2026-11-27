@@ -35,4 +35,5 @@ cd "$WIN/src"
   --collect-all ctranslate2 --collect-all sentencepiece \
   retro_translator/__main__.py > ../pyinstaller.log 2>&1 || { tail -30 ../pyinstaller.log; exit 1; }
 cat ../dist/retro-translator.exe ../neural.zip > "$FINAL"
+rm -rf "${WIN:?}"  # the build folder (~1 GB) is not kept: the C: drive is often nearly full
 du -sh "$FINAL"

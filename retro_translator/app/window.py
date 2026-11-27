@@ -234,7 +234,30 @@ def draw_progress(screen, name_, language, work, seconds):
     view = pygame.Rect(panel.x + 24, panel.y + 64, 320, 224)  # the game the program is playing by itself, live
     pygame.draw.rect(screen, INK, view.inflate(16, 16))
     pygame.draw.rect(screen, EDGE, view.inflate(16, 16), 4)
-    if progress.frame is not None:
+    if work["phase"] == "translate" and progress.lines:  # the texts as they are translated: original, then ours
+        y = view.bottom - 8
+        for a, b in reversed(progress.lines):
+            for text, color in ((b, GREEN), (a, SILVER)):
+                y -= 16
+                if y < view.y:
+                    break
+                write(screen, text[:37] + ("..." if len(text) > 37 else ""), (view.x + 4, y), color, 1)
+            if y < view.y:
+                break
+    elif work["phase"] in ("font", "kana", "ai"):  # thinking, no game to show: say what, moving, or it looks stuck
+        if progress.frame is not None:
+            screen.blit(pygame.surfarray.make_surface((progress.frame // 4).swapaxes(0, 1)), view)
+        words, lines = t["busy"].split(), [""]
+        for w in words:
+            lines[-1:] = [lines[-1] + " " + w] if len(lines[-1] + w) < 18 else [lines[-1], w]
+        y = view.centery - 32 * len(lines) // 2 - 12
+        for line in lines:
+            write(screen, line.strip(), (view.centerx, y), WHITE, 2, "center")
+            y += 32
+        dots = int(seconds * 4) % 8
+        for k in range(8):
+            pygame.draw.rect(screen, YELLOW if k == dots else DIM, (view.centerx - 60 + k * 16, y + 12, 8, 8))
+    elif progress.frame is not None:
         screen.blit(pygame.surfarray.make_surface(progress.frame.swapaxes(0, 1)), view)
     elif blink:
         write(screen, "...", view.center, DIM, 2, "center")
@@ -285,7 +308,7 @@ def draw_progress(screen, name_, language, work, seconds):
     for c in range(cells):
         pygame.draw.rect(screen, (GREEN if f == 1.0 else YELLOW) if c in lit else (34, 38, 82),
                          (int(bar.x + 4 + c * (cw + gap)), bar.y + 4, int(cw), bar.h - 8))
-    write(screen, f"{t['first']}   {int(seconds) // 60}:{int(seconds) % 60:02d}",
+    write(screen, f"{int(seconds) // 60}:{int(seconds) % 60:02d}",
           (screen.get_width() // 2, screen.get_height() - 48), DIM, 2, "center")
     scanlines(screen)
 
@@ -384,6 +407,15 @@ def main(rom=None, language=None, test=0):
     toast = -10 ** 6  # when F1 was pressed: its notice stays on screen for a moment
     tl = TEXT.get(language, TEXT["en"])
     frame_n = 0
+    # the credit, in the translation's language and the game's font, on a screen of its own before the game: it covers
+    # nothing of the game and the ROM is not changed; any key skips it
+    credit = overlay.card([tl["credit"] + " LeoFeitosa", "github.com/LeoFeitosa/retro-translator"], font_)
+    sup = pygame.transform.scale(pygame.surfarray.make_surface(credit.swapaxes(0, 1)), screen.get_size())
+    end_ = pygame.time.get_ticks() + (300 if test else 2000)
+    while pygame.time.get_ticks() < end_ and not any(ev.type == pygame.KEYDOWN for ev in pygame.event.get()):
+        screen.blit(sup, (0, 0))
+        pygame.display.flip()
+        clock.tick(30)
     while True:
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT or (ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE):

@@ -1,5 +1,6 @@
 """Summary of results.jsonl: python -m tools.summary"""
 import json
+import os
 from collections import Counter
 rs = [json.loads(l) for l in open("results.jsonl")]
 ok = [r for r in rs if "failure" not in r]
@@ -15,6 +16,15 @@ if cpu:
 print("failures:", Counter(r["failure"][:60] for r in rs if "failure" in r).most_common(5))
 
 
+ROMS = os.environ.get("ROMS", "/mnt/c/Users/LMinds/Downloads/ROMS/ROMS Sega Genesis")
+
+
+def _ascii(game):
+    from retro_translator.core.rewriting import rom_text
+    path_ = os.path.join(ROMS, game)
+    return os.path.exists(path_) and rom_text.ascii_text(open(path_, "rb").read(), 0) is not None
+
+
 def kind(r):
     """Likely cause, to fix by group and not game by game."""
     if "failure" in r:
@@ -24,7 +34,8 @@ def kind(r):
     if r["glyphs"] > 90:
         return "variable-width font or garbage (too many glyphs)"
     if r["accuracy"] is None and r["glyphs"] < 30:
-        return "little text collected (<30 letters)"
+        return ("little on screen, plain ASCII in the ROM (translated from there)" if _ascii(r["game"])
+                else "little text collected (<30 letters)")
     if r["accuracy"] is None:
         return "no testable excerpt (table does not close)"
     if r["accuracy"] >= 0.9:

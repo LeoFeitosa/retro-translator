@@ -33,6 +33,8 @@ def learn_font(rom, name_, work):
     if not os.path.exists(path_):
         step(work, "play")
         found, indices = evaluate.collection(rom)
+        from retro_translator.core import worker
+        kana_job = worker.start("--kana", rom)  # needs nothing from the font: on its own core at the same time
         step(work, "font")
         language, table, _ = decipher.language_and_font(found, indices, exclude=name_)
         guessed, evidence = table, {}
@@ -40,7 +42,8 @@ def learn_font(rom, name_, work):
             table = decipher.confirmed(table, found, language, evidence)
         trusted = decipher.trusted(table)
         step(work, "kana")
-        map_, _ = cjk.learn(rom, "ja")  # ~30 s; Japanese read as Latin letters can look like Spanish words
+        got = worker.result(kana_job)  # Japanese read as Latin letters can look like Spanish words
+        map_ = {bytes.fromhex(g): c for g, c in json.loads(got).items()} if got else cjk.learn(rom, "ja")[0]
         if len(map_) >= MIN_KANA:
             language = "ja"
         else:

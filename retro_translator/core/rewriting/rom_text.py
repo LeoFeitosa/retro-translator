@@ -139,6 +139,28 @@ def banks(groups, seen, slack=1024):
     return out_
 
 
+def _continues(before, text):
+    """FF is also the start of a command in some games (Starflight: FF 03 = next line): across it, a line that does
+    not end its sentence and a next one that does are the same sentence ("REPORT TO SHIP CONSTRUCTION" / "TO NAME YOUR
+    SHIP."). Menus have no sentence end and stay apart."""
+    if (re.search(r"[.!?:\"')]\s*$", before) or re.search(r"[.!?]\W*$", text) is None or len(before.split()) < 2
+            or re.match(r"\s*\w\s?[:-]", before)):
+        return False
+    # and the grammar says it goes on: the line ends in a word that needs more ("PROVED TO BE", "LOCATED AN") or the
+    # next starts with one ("TO NAME YOUR SHIP"), or with a small letter
+    last, first = before.split()[-1].lower(), text.split()[0]
+    if last in _LINKS or first[0].islower():
+        return True
+    # in capitals the first word cannot show a new sentence: only words that hardly ever start one
+    return before.isupper() and text.isupper() and first.lower() in _GOES_ON
+
+
+_LINKS = set("a an the to of in on at by for from with into onto about as and or but nor that which who whom whose "
+             "than be is are was were been being has have had do does did will would can could shall should may might "
+             "must not no your my our their his her its this these those".split())
+_GOES_ON = set("to of in on at by for from with into onto about as and or but nor than".split())
+
+
 def messages(rom, sentences, width_):
     """Joins the lines of one box: between them only short control codes (line break, position of the
     next line...). A gap with 00 or FF is end of text and splits."""
@@ -147,7 +169,7 @@ def messages(rom, sentences, width_):
     for f in sentences:
         if groups:
             gap = rom[end(groups[-1][-1]):f[0]]
-            if 0 < len(gap) <= 4 * width_ and not any(b in gap for b in (0, 255)):
+            if 0 < len(gap) <= 4 * width_ and 0 not in gap and (255 not in gap or _continues(groups[-1][-1][1], f[1])):
                 groups[-1].append(f)
                 continue
         groups.append([f])
@@ -623,7 +645,15 @@ def translate(route, language="pt", out_=None, table=None, ascii_only=False):
     if not units:
         return None
     texts = [" ".join(" ".join(t.split()) for _, t in u) for u, *_ in units]
-    trans = translation.translate_batch(texts, language)
+    from retro_translator.core import progress
+    trans = []
+    progress.expect(len(texts))
+    for k in range(0, len(texts), 32):  # in parts, so the program's screen shows each text as it is translated
+        part = translation.translate_batch(texts[k:k + 32], language)
+        for a, b in zip(texts[k:k + 32], part):
+            progress.said(a, b or a)
+        trans += part
+        progress.done = len(trans)
     rom, done, moved = bytearray(data), 0, 0
     start_, end = free(data, console)
     free_space = {"next": start_, "end": end}
@@ -724,8 +754,11 @@ def _leave_view(m, i):
     """In the measuring process: the screen it is playing, left for the program's window every few steps."""
     path = os.environ.get("RT_VIEW")
     if path and i % 5 == 0:
-        np.save(path + ".tmp.npy", m.frame)
-        os.replace(path + ".tmp.npy", path)
+        try:
+            np.save(path + ".tmp.npy", m.frame)
+            os.replace(path + ".tmp.npy", path)
+        except OSError:  # a full disk: the picture is only for the screen, the measure goes on
+            pass
 
 
 def _brightness_in_process(*roms, mode="--brightness"):

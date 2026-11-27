@@ -142,13 +142,21 @@ def _letter(c):
     return c != EMPTY and not c.startswith("#")
 
 
+_HIGHS = {}
+
+
 def _high(a, b):
     ca, cb = glyph(a), glyph(b)
     if ca == EMPTY and cb == EMPTY:
         return EMPTY
-    key_ = f"{ca.lstrip('#')}/{cb.lstrip('#')}"
-    pxs = np.vstack([a, b])
-    return key_ if looks_letter(pxs, pxs != np.bincount(pxs.ravel()).argmax()) else "#" + key_
+    k = (a.tobytes(), b.tobytes())  # the screen repeats the same pairs: this check was most of the reading time
+    if k not in _HIGHS:
+        if len(_HIGHS) > 200000:
+            _HIGHS.clear()
+        key_ = f"{ca.lstrip('#')}/{cb.lstrip('#')}"
+        pxs = np.vstack([a, b])
+        _HIGHS[k] = key_ if looks_letter(pxs, pxs != np.bincount(pxs.ravel()).argmax()) else "#" + key_
+    return _HIGHS[k]
 
 
 def _segment(cel, plane, y, seen):

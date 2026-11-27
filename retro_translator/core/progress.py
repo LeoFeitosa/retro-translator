@@ -23,3 +23,11 @@ def show(img):
 
 def fraction():
     return min(1.0, done / total) if total else None
+
+
+lines = []  # the latest texts translated, (original, translation), shown while the translation step runs
+
+
+def said(original, translated):
+    lines.append((original, translated))
+    del lines[:-12]

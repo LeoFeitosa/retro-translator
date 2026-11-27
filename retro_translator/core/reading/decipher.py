@@ -47,8 +47,17 @@ def words(found):
 class Dictionary:
     def __init__(self, language="en", n=30000):
         self.score = {w: zipf_frequency(w, language) for w in top_n_list(language, n) if w.isalpha() or "'" in w}
+        self.memo = {}
 
     def __call__(self, text):
+        """The search asks about the same strings millions of times: each one is worked out once."""
+        if text not in self.memo:
+            if len(self.memo) > 2000000:
+                self.memo.clear()
+            self.memo[text] = self._score(text)
+        return self.memo[text]
+
+    def _score(self, text):
         core = text.rstrip(".,!?:-")
         end = text[len(core):]
         if not core or (len(end) > 1 and end not in ("...", "!?", "?!")):
@@ -121,12 +130,14 @@ def _reheat(found, dic, steps, seed, prior):
     def word_score(i):
         return weight[i] * dic("".join(map_[g] for g in list_[i]))
 
+    usage = Counter(map_.values())  # kept up to date with each change: counting the whole map every step was slow
+
     def excess():
-        usage = Counter(map_.values())
         return sum(max(0, n - MAX_PER_LETTER) for n in usage.values())
 
     scores = [word_score(i) for i in range(len(list_))]
-    total = sum(scores) - PENALTY * excess() + bonus(map_)
+    before = excess()
+    total = sum(scores) - PENALTY * before + bonus(map_)
     best, best_map = total, dict(map_)
     for step in range(steps):
         temp = 2.0 * (1 - step / steps) + 0.05
@@ -140,18 +151,25 @@ def _reheat(found, dic, steps, seed, prior):
             if map_[h] not in can[g] or map_[g] not in can[h]:
                 continue
             map_[g], map_[h] = map_[h], map_[g]
+        for k, v in old.items():
+            usage[v] -= 1
+            usage[map_[k]] += 1
+        after = excess()
         affected = set(i for k in old for i in where_[k])
         new_ones = {i: word_score(i) for i in affected}
-        new_total = (total + sum(new_ones[i] - scores[i] for i in affected) - PENALTY * excess()
-                      + PENALTY * _exc_before(map_, old)
+        new_total = (total + sum(new_ones[i] - scores[i] for i in affected) - PENALTY * after
+                      + PENALTY * before
                       + PRIOR_WEIGHT * sum((map_[k] == predicted[k]) - (old[k] == predicted[k]) for k in old if k in predicted))
         if new_total >= total or rnd.random() < math.exp((new_total - total) / temp):
-            total = new_total
+            total, before = new_total, after
             for i, v in new_ones.items():
                 scores[i] = v
             if total > best:
                 best, best_map = total, dict(map_)
         else:
+            for k, v in old.items():
+                usage[map_[k]] -= 1
+                usage[v] += 1
             map_.update(old)
     return best, best_map
 
@@ -305,14 +323,6 @@ def _sign(g, l, base, x_alt):
     return "," if low > base or len(blocks) > 1 else "."  # period is a block of equal rows; comma has a tail
 
 
-def _exc_before(map_, old):
-    """Excess glyphs per letter before the change (for the penalty delta)."""
-    current = dict(map_)
-    current.update(old)
-    usage = Counter(current.values())
-    return sum(max(0, n - MAX_PER_LETTER) for n in usage.values())
-
-
 def sequence(map_, found, indices, language="en", dictionary=None):
     """Font stored in ASCII order: each offset (memory position - letter code) becomes a candidate map
     that overrides the search where it lands on a letter or digit. The one with the best dictionary score wins
@@ -413,11 +423,25 @@ def language_and_font(found, indices, exclude=None):
     import re
     from wordfreq import zipf_frequency
     from retro_translator.core import progress
+    import json
+    import pickle
+    import tempfile
+    from retro_translator.core import worker
     best = None
     progress.expect(len(LANGUAGES))
-    for language in LANGUAGES:
-        table = read_font(found, indices, exclude, language)
-        progress.tick()
+    # each language on its own processor core (the slowest step of learning, a third of the time)
+    with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+        pickle.dump((found, indices), f)
+    try:
+        jobs = [worker.start("--font", language, f.name, exclude or "") for language in LANGUAGES]
+        tables = []
+        for language, job in zip(LANGUAGES, jobs):
+            got = worker.result(job)
+            tables.append(json.loads(got) if got else read_font(found, indices, exclude, language))
+            progress.tick()
+    finally:
+        os.remove(f.name)
+    for language, table in zip(LANGUAGES, tables):
         text = " ".join("".join(table.get(c) or "_" if c else " " for c in t) for t in found)
         score = len({w for w in re.findall(r"[^\W\d_]{3,}", text.lower()) if zipf_frequency(w, language) >= 3})
         if best is None or score > 1.3 * best[0]:
