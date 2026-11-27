@@ -459,6 +459,7 @@ def confirmed(table, found, language, evidence=None):
     would be written into the translation and read back as a wrong letter; unknown, its line is left as it was."""
     from collections import defaultdict
     from wordfreq import zipf_frequency
+    import re
     words = defaultdict(set)
     for t in found:
         run = []
@@ -468,11 +469,15 @@ def confirmed(table, found, language, evidence=None):
                 run.append((c, letter))
                 continue
             word = "".join(l for _, l in run).lower()
-            if len(word) >= 3 and zipf_frequency(word, language) >= 3:
+            # a run of one letter ("mmm", "aaa") is a word in any reading: it proves nothing
+            if len(word) >= 3 and zipf_frequency(word, language) >= 3 and not re.search(r"(.)\1\1", word):
                 for g, _ in run:
                     words[g].add(word)
             run = []
-    kept = {g: l for g, l in table.items() if not l.isalpha() or len(words[g]) >= MIN_WORDS}
+    # short common strings ("ltd", "usd", "ian") also turn up in wrong readings: with only MIN_WORDS words, one of them
+    # has to be longer (40 games: wrong letters 11 -> 5, readable runs 0.115 -> 0.102)
+    kept = {g: l for g, l in table.items() if not l.isalpha() or len(words[g]) > MIN_WORDS
+            or (len(words[g]) == MIN_WORDS and any(len(w) >= 4 for w in words[g]))}
     if len(kept) < len(table):  # words that leaned on a dropped glyph prove nothing: again, until nothing drops
         return confirmed(kept, found, language, evidence)
     # punctuation guessed by shape is wrong about half the time (a letter taken for "?", "'" for "-"), and the
