@@ -28,7 +28,8 @@ def clear_if_changed():
     if os.path.exists(mark) and open(mark).read() == v:
         return
     for name_ in os.listdir(preparation.FOLDER):
-        if name_ in ("settings.json", preparation.REPORTS):  # the user's choices and the reports survive a new version
+        # the user's choices, the reports, the AI download (2.8 GB) and the open logs survive a new version
+        if name_ in ("settings.json", preparation.REPORTS, "ai", "crash.log", "error.log"):
             continue
         route = os.path.join(preparation.FOLDER, name_)
         shutil.rmtree(route, ignore_errors=True) if os.path.isdir(route) else os.remove(route)

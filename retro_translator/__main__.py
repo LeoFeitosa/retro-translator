@@ -29,6 +29,10 @@ def run(args):
         os.environ["SDL_VIDEODRIVER"] = "dummy"
         window.main(args[1], args[2] if len(args) > 2 else "pt", test=6000)
     else:
+        import faulthandler
+        os.makedirs(preparation.FOLDER, exist_ok=True)  # a crash below Python (emulator, drivers) also leaves a trace
+        crash = open(os.path.join(preparation.FOLDER, "crash.log"), "w", encoding="utf-8")
+        faulthandler.enable(crash, all_threads=True)
         try:
             window.main(*args[:2])
         except Exception:  # the windowed executable has no console: the error goes to a file the user can send

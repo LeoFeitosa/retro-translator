@@ -9,12 +9,12 @@ import time
 from retro_translator import HERE
 
 
-def start(*args):
+def start(*args, env=None):
     """A process running `retro_translator <args>`: its printed answer is read with result()."""
     cmd = [sys.executable, *args] if getattr(sys, "frozen", False) else [sys.executable, "-m", "retro_translator", *args]
     out_ = tempfile.TemporaryFile("w+")  # a file, not a pipe: a full pipe would stop the child while this waits
     p = subprocess.Popen(cmd, stdout=out_, stderr=subprocess.DEVNULL, text=True,
-                         env={**os.environ, "PYTHONPATH": os.path.dirname(HERE)})
+                         env={**os.environ, "PYTHONPATH": os.path.dirname(HERE), **(env or {})})
     return p, out_
 
 
@@ -31,3 +31,12 @@ def result(job, limit=1800):
     lines = out_.read().strip().splitlines()
     out_.close()
     return lines[-1] if p.returncode == 0 and lines else None
+
+
+def stop(job):
+    """The answer is not needed any more."""
+    p, out_ = job
+    if p.poll() is None:
+        p.kill()
+        p.wait()
+    out_.close()

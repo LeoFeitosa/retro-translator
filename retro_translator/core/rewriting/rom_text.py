@@ -648,9 +648,9 @@ def translate(route, language="pt", out_=None, table=None, ascii_only=False):
     from retro_translator.core import progress
     trans = []
     progress.expect(len(texts))
-    for k in range(0, len(texts), 32):  # in parts, so the program's screen shows each text as it is translated
-        part = translation.translate_batch(texts[k:k + 32], language)
-        for a, b in zip(texts[k:k + 32], part):
+    for k in range(0, len(texts), 128):  # in parts, so the program's screen shows each text as it is translated
+        part = translation.translate_batch(texts[k:k + 128], language)
+        for a, b in zip(texts[k:k + 128], part):
             progress.said(a, b or a)
         trans += part
         progress.done = len(trans)
@@ -761,6 +761,33 @@ def _leave_view(m, i):
             pass
 
 
+def _measure_all(runs, limit=600):
+    """_brightness_in_process for several ROM sets at once, each in its own process; the last one shows on screen."""
+    import ast
+    import tempfile
+    import time
+    from retro_translator.core import progress, worker
+    view = os.path.join(tempfile.gettempdir(), f"rt-view-{os.getpid()}.npy")
+    jobs = [worker.start("--brightness", *r, env={"RT_VIEW": view} if k == len(runs) - 1 else None)
+            for k, r in enumerate(runs)]
+    t0 = time.time()
+    while any(p.poll() is None for p, _ in jobs) and time.time() - t0 < limit:
+        time.sleep(0.3)
+        try:
+            progress.show(np.load(view))
+        except (OSError, ValueError):
+            pass
+    out_ = []
+    for job in jobs:
+        got = worker.result(job, limit=1)
+        out_.append(ast.literal_eval(got) if got else None)
+    try:
+        os.remove(view)
+    except OSError:
+        pass
+    return out_
+
+
 def _brightness_in_process(*roms, mode="--brightness"):
     import subprocess
     import tempfile
@@ -799,9 +826,6 @@ def link_(original, translated):
     treats the sum its own way: some verify it, others use the header or the end of the ROM for something else; tries
     balancing at the end, not touching it and recomputing the header. If none runs, finds the culprit changes (bisection)
     and reverts only those. False if it cannot."""
-    ref = _brightness_in_process(original)
-    if ref is None:
-        return False
     console = consoles.for_rom(original)
     orig = bytes(console.read_rom(original))
     end = console.data_end(orig)
@@ -821,12 +845,26 @@ def link_(original, translated):
         return (bytes(trans), bytes(base), bytes(header))
 
     trans = bytes(open(translated, "rb").read())
-    if any(good(v) for v in versions(trans)):
-        return True
-    # the game verifies its ROM its own way: boot the original and write the translation into memory after start-up
+    # the three ways of treating the sum and the memory way (the game verifies its ROM its own way: boot the original
+    # and write the translation into memory after start-up), all measured at the same time on other cores
+    files = []
+    for k, version in enumerate(versions(trans)):
+        files.append(f"{translated}.try{k}")
+        open(files[-1], "wb").write(version)
     open(translated, "wb").write(trans)
-    v = _brightness_in_process(original, translated)
-    if v and all(t > 5 or o <= 5 for o, t in zip(ref, v)):
+    try:
+        ref, *got = _measure_all([(original,)] + [(f,) for f in files] + [(original, translated)])
+    finally:
+        for f in files:
+            os.remove(f)
+    if ref is None:
+        return False
+    runs = lambda v: bool(v) and all(t > 5 or o <= 5 for o, t in zip(ref, v))
+    for version, v in zip(versions(trans), got):
+        if runs(v):
+            open(translated, "wb").write(version)
+            return True
+    if runs(got[-1]):
         return "memory"
     for _ in range(6):
         if any(good(v) for v in versions(trans)):
