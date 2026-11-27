@@ -475,6 +475,22 @@ def confirmed(table, found, language, evidence=None):
     kept = {g: l for g, l in table.items() if not l.isalpha() or len(words[g]) >= MIN_WORDS}
     if len(kept) < len(table):  # words that leaned on a dropped glyph prove nothing: again, until nothing drops
         return confirmed(kept, found, language, evidence)
+    # punctuation guessed by shape is wrong about half the time (a letter taken for "?", "'" for "-"), and the
+    # translation adds punctuation of its own: a mark is kept when it closes real words at least MIN_WORDS times.
+    # Digits stay: a number is copied from the original, so its drawing goes back where it was (40 games: wrong
+    # symbols 69 -> 29, readable runs 0.115 -> 0.109)
+    closes = defaultdict(int)
+    for t in found:
+        for k, c in enumerate(t):
+            mark = kept.get(c) if c else None
+            if not mark or mark.isalnum():
+                continue
+            j, word = k - 1, ""
+            while j >= 0 and t[j] and (kept.get(t[j]) or "").isalpha():
+                word, j = kept[t[j]] + word, j - 1
+            if len(word) >= 3 and zipf_frequency(word.lower(), language) >= 3:
+                closes[c] += 1
+    kept = {g: l for g, l in kept.items() if l.isalnum() or closes[g] >= MIN_WORDS}
     if evidence is not None:
         evidence.update({g: sorted(w) for g, w in words.items()})
     return kept
