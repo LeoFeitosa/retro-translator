@@ -1,6 +1,9 @@
 """Summary of results.jsonl: python -m tools.summary"""
 import json
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from collections import Counter
 rs = [json.loads(l) for l in open("results.jsonl")]
 ok = [r for r in rs if "failure" not in r]

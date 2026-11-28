@@ -39,7 +39,7 @@ def learn_font(rom, name_, work):
         language, table, _ = decipher.language_and_font(found, indices, exclude=name_)
         guessed, evidence = table, {}
         if language != "ja":
-            table = decipher.confirmed(table, found, language, evidence)
+            table = decipher.confirmed(table, found, language, evidence, decipher.library(exclude=name_))
         trusted = decipher.trusted(table)
         if trusted and language == "en":  # read as English in real words: not Japanese, no need to wait for it
             worker.stop(kana_job)

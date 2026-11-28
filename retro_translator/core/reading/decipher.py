@@ -408,9 +408,49 @@ def sequence(map_, found, indices, language="en", dictionary=None):
     return out_
 
 
+# glyphs a few pixels away from one of another game pull toward its letter too (40 games, with confirmed(seen=):
+# translatable 21 -> 25 of 40; 4 pixels away: more letters but wrong ones too)
+FUZZY = 2
+
+
+def _shape(g):
+    m = mask(g).astype(bool)
+    m = np.vstack([m, np.zeros((max(0, 16 - m.shape[0]), m.shape[1]), bool)])[:16, :8]
+    ys, xs = np.nonzero(m)
+    return None if len(ys) == 0 else np.roll(np.roll(m, -ys.min(), 0), -xs.min(), 1).reshape(-1)
+
+
+def _near(glyphs, exclude, limit):
+    """Letter of the nearest glyph of other games (Hamming distance on the aligned drawing), when close enough."""
+    import glob
+    import json
+    rows, letters = [], []
+    for path_ in glob.glob(os.path.join(DATA, "tables", "*.json")):
+        if exclude and os.path.splitext(os.path.basename(path_))[0] == exclude:
+            continue
+        for g, l in json.load(open(path_, encoding="utf-8")).items():
+            v = _shape(g)
+            if v is not None and len(l) == 1:
+                rows.append(v)
+                letters.append(l)
+    if not rows:
+        return {}
+    X, out = np.array(rows), {}
+    for g in glyphs:
+        v = _shape(g)
+        if v is None:
+            continue
+        d = (X != v).sum(1)
+        if d.min() <= limit:
+            out[g] = letters[int(d.argmin())]
+    return out
+
+
 def read_font(found, indices, exclude=None, language="en"):
     """Glyph -> letter table with CPU only: this is what the executable uses."""
-    map_ = decipher(found, language, prior=library(exclude=exclude))
+    prior = library(exclude=exclude)
+    prior.update(_near({g for w in words(found) for g in w} - prior.keys(), exclude, FUZZY))
+    map_ = decipher(found, language, prior=prior)
     return by_order(box(sequence(map_, found, indices, language), found), indices)
 
 
@@ -453,10 +493,13 @@ MIN_WORDS = 2  # real words a glyph must be read in before its letter is trusted
 MIN_LETTERS = 10  # confirmed letters a game needs before it is translated at all
 
 
-def confirmed(table, found, language, evidence=None):
+def confirmed(table, found, language, evidence=None, seen=None):
     """The table without the letters it only guessed: a glyph keeps its letter when it is read inside at least
     MIN_WORDS different real words of the language (the words of each glyph go into `evidence` when given). A guessed glyph (a second font, a digit labelled as a letter)
-    would be written into the translation and read back as a wrong letter; unknown, its line is left as it was."""
+    would be written into the translation and read back as a wrong letter; unknown, its line is left as it was.
+    A glyph drawn exactly like one of another game (`seen`, from library) with the same letter is kept too: two
+    independent proofs that agree (co-training, Blum and Mitchell 1998; 40 games: letters right 400 -> 521, wrong
+    5 -> 10, translatable 18 -> 25)."""
     from collections import defaultdict
     from wordfreq import zipf_frequency
     import re
@@ -476,10 +519,12 @@ def confirmed(table, found, language, evidence=None):
             run = []
     # short common strings ("ltd", "usd", "ian") also turn up in wrong readings: with only MIN_WORDS words, one of them
     # has to be longer (40 games: wrong letters 11 -> 5, readable runs 0.115 -> 0.102)
+    seen = seen or {}
     kept = {g: l for g, l in table.items() if not l.isalpha() or len(words[g]) > MIN_WORDS
-            or (len(words[g]) == MIN_WORDS and any(len(w) >= 4 for w in words[g]))}
+            or (len(words[g]) == MIN_WORDS and any(len(w) >= 4 for w in words[g]))
+            or seen.get(g, "").lower() == l.lower()}
     if len(kept) < len(table):  # words that leaned on a dropped glyph prove nothing: again, until nothing drops
-        return confirmed(kept, found, language, evidence)
+        return confirmed(kept, found, language, evidence, seen)
     # punctuation guessed by shape is wrong about half the time (a letter taken for "?", "'" for "-"), and the
     # translation adds punctuation of its own: a mark is kept when it closes real words at least MIN_WORDS times.
     # Digits stay: a number is copied from the original, so its drawing goes back where it was (40 games: wrong
